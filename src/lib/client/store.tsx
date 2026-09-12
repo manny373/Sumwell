@@ -19,8 +19,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import type { AutomationRuleStatus, GivingPlan } from "~/lib/finance/types";
 import { todayISO } from "./dates";
-import { demoHousehold, manualHouseholdFor } from "./household";
+import {
+  demoHousehold,
+  manualHouseholdFor,
+  withAllRulesPaused,
+  withDebtExtraBudget,
+  withGivingPlan,
+  withGoalPriority,
+  withRuleStatus,
+} from "./household";
 import {
   clearPersisted,
   defaultStorage,
@@ -48,6 +57,17 @@ export interface ClientStore {
   replaceHousehold(inputs: ManualOnboardingInputs): void;
   /** Clear everything and return to onboarding. */
   startOver(): void;
+  /* ---------------------------------------------------- Phase 3b edits */
+  /** Replace the giving plan (mode, amount/percent, enabled). */
+  setGivingPlan(plan: GivingPlan): void;
+  /** Pause/resume one automation rule (draft = armed preview). */
+  setRuleStatus(ruleId: string, status: AutomationRuleStatus): void;
+  /** Pause every rule; false = resume all paused rules to draft. */
+  setAllRulesPaused(paused: boolean): void;
+  /** Move a goal to a priority (1 = highest); others renumber. */
+  setGoalPriority(goalId: string, priority: number): void;
+  /** Set the monthly extra debt budget used by both debt strategies. */
+  setDebtExtraBudget(cents: number): void;
 }
 
 const ClientDataContext = createContext<ClientStore | null>(null);
@@ -89,6 +109,37 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     setApp(null);
   }, []);
 
+  /** Apply a pure household mutation and persist. */
+  const mutate = useCallback((fn: (h: Household) => Household) => {
+    setApp((prev) => {
+      if (!prev?.household) return prev;
+      return currentState(true, fn(prev.household));
+    });
+  }, []);
+
+  const setGivingPlan = useCallback(
+    (plan: GivingPlan) => mutate((h) => withGivingPlan(h, plan)),
+    [mutate],
+  );
+  const setRuleStatus = useCallback(
+    (ruleId: string, status: AutomationRuleStatus) =>
+      mutate((h) => withRuleStatus(h, ruleId, status)),
+    [mutate],
+  );
+  const setAllRulesPaused = useCallback(
+    (paused: boolean) => mutate((h) => withAllRulesPaused(h, paused)),
+    [mutate],
+  );
+  const setGoalPriority = useCallback(
+    (goalId: string, priority: number) =>
+      mutate((h) => withGoalPriority(h, goalId, priority)),
+    [mutate],
+  );
+  const setDebtExtraBudget = useCallback(
+    (cents: number) => mutate((h) => withDebtExtraBudget(h, cents)),
+    [mutate],
+  );
+
   const value = useMemo<ClientStore>(
     () => ({
       status,
@@ -98,8 +149,25 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       saveManual,
       replaceHousehold,
       startOver,
+      setGivingPlan,
+      setRuleStatus,
+      setAllRulesPaused,
+      setGoalPriority,
+      setDebtExtraBudget,
     }),
-    [status, app, loadDemo, saveManual, replaceHousehold, startOver],
+    [
+      status,
+      app,
+      loadDemo,
+      saveManual,
+      replaceHousehold,
+      startOver,
+      setGivingPlan,
+      setRuleStatus,
+      setAllRulesPaused,
+      setGoalPriority,
+      setDebtExtraBudget,
+    ],
   );
 
   return <ClientDataContext.Provider value={value}>{children}</ClientDataContext.Provider>;

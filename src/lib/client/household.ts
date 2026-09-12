@@ -16,7 +16,10 @@
 import type {
   Account,
   AutomationRule,
+  AutomationRuleStatus,
   GivingCategory,
+  GivingPlan,
+  Goal,
   Obligation,
   Paycheck,
 } from "~/lib/finance/types";
@@ -38,6 +41,7 @@ export const MANUAL_HOUSEHOLD_LABEL = "Your household";
  *   essentials: $250/cycle · buffer: $300/cycle · emergency fund: $200/cycle
  *   giving: $60/cycle (per-check share of the $120/month demo giving plan on
  *   biweekly pay — see givingForCycle in ./plan.ts)
+ *   debt extra budget: $250/month (a demo choice — editable on the Plan tab)
  *
  * Hand-checked against the engine: with the seeded checking available balance
  * of $1,799.94 and the bills due between the Sep 10 and Sep 25 paychecks
@@ -53,6 +57,7 @@ export const DEMO_PLAN_ASSUMPTIONS: PlanAssumptions = {
       amountCents: 20000,
     },
   ],
+  debtExtraBudgetCents: 25000,
 };
 
 /** Copy the frozen demo snapshot into a mutable Household wrapper. */
@@ -69,6 +74,7 @@ export function demoHousehold(createdAt?: string): Household {
     obligations: [...snapshot.obligations],
     debts: [...snapshot.debts],
     goals: [...snapshot.goals],
+    goalContributions: [...snapshot.goalContributions],
     givingPlan: { ...snapshot.givingPlan },
     automationRules: [...snapshot.automationRules],
     assumptions: {
@@ -77,6 +83,7 @@ export function demoHousehold(createdAt?: string): Household {
       goalContributions: DEMO_PLAN_ASSUMPTIONS.goalContributions.map((g) => ({
         ...g,
       })),
+      debtExtraBudgetCents: DEMO_PLAN_ASSUMPTIONS.debtExtraBudgetCents,
     },
   };
 }
@@ -199,6 +206,7 @@ export function manualHouseholdFor(
       : [],
     givingPlan: manualGivingPlan(inputs),
     automationRules,
+    goalContributions: [],
     assumptions: {
       essentialsPerCycleCents: inputs.essentialsPerCycleCents,
       bufferCents: inputs.bufferCents,
@@ -211,6 +219,106 @@ export function manualHouseholdFor(
             },
           ]
         : [],
+      debtExtraBudgetCents: 0,
     },
+  };
+}
+
+/* ------------------------------------------------- phase 3b mutations --- */
+/**
+ * Pure household mutations for Phase 3b screens. Each returns a NEW household
+ * (the caller, usually the store, persists it); inputs are never mutated.
+ * They live here rather than in components so every change path is unit-testable.
+ */
+
+/** Read goal contributions defensively (older persisted states lack the field). */
+export function householdGoalContributions(
+  household: Household,
+): Household["goalContributions"] {
+  return household.goalContributions ?? [];
+}
+
+/** Read the extra debt budget; older persisted states fall back per-source. */
+export function debtExtraBudgetFor(household: Household): number {
+  return (
+    household.assumptions.debtExtraBudgetCents ??
+    (household.source === "demo" ? 25000 : 0)
+  );
+}
+
+/** Replace the giving plan (mode, amount/percent, enabled). */
+export function withGivingPlan(household: Household, plan: GivingPlan): Household {
+  return { ...household, givingPlan: { ...plan } };
+}
+
+/** Set a rule's status (draft = armed preview, paused = opted out). */
+export function withRuleStatus(
+  household: Household,
+  ruleId: string,
+  status: AutomationRuleStatus,
+): Household {
+  return {
+    ...household,
+    automationRules: household.automationRules.map((r) =>
+      r.id === ruleId ? { ...r, status } : r,
+    ),
+  };
+}
+
+/** Pause every rule (or resume all paused → draft). Same control, both ways. */
+export function withAllRulesPaused(
+  household: Household,
+  paused: boolean,
+): Household {
+  return {
+    ...household,
+    automationRules: household.automationRules.map((r) => ({
+      ...r,
+      status: paused ? "paused" : r.status === "paused" ? "draft" : r.status,
+    })),
+  };
+}
+
+/**
+ * Re-prioritize goals: move `goalId` to `newPriority` (1 = highest) and
+ * renumber the others so priorities stay a clean 1..n with no collisions.
+ */
+export function withGoalPriority(
+  household: Household,
+  goalId: string,
+  newPriority: number,
+): Household {
+  const goals = household.goals;
+  const target = goals.find((g) => g.id === goalId);
+  if (!target) return household;
+  if (!Number.isInteger(newPriority) || newPriority < 1 || newPriority > goals.length) {
+    return household;
+  }
+  if (target.priority === newPriority) return household;
+  const others = goals
+    .filter((g) => g.id !== goalId)
+    .slice()
+    .sort((a, b) => a.priority - b.priority);
+  const renumbered: Goal[] = others.map((g, i) => ({
+    ...g,
+    // Slots 1..n with `newPriority` reserved for the moved goal.
+    priority: i + 1 < newPriority ? i + 1 : i + 2,
+  }));
+  const moved: Goal = { ...target, priority: newPriority };
+  return {
+    ...household,
+    goals: [...renumbered, moved].sort((a, b) => a.priority - b.priority),
+  };
+}
+
+/** Update the monthly extra debt budget stored in the plan assumptions. */
+export function withDebtExtraBudget(
+  household: Household,
+  cents: number,
+): Household {
+  if (!Number.isSafeInteger(cents) || cents < 0) return household;
+  return {
+    ...household,
+    assumptions: { ...household.assumptions, debtExtraBudgetCents: cents },
   };
 }

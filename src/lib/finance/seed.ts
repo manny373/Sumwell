@@ -15,6 +15,7 @@ import type {
   Debt,
   GivingPlan,
   Goal,
+  GoalContribution,
   Obligation,
   Paycheck,
   Transaction,
@@ -42,6 +43,8 @@ export interface DemoSnapshot {
   goals: Goal[];
   /** Optional giving plan — fixed amount, NO preselected percentage. */
   givingPlan: GivingPlan;
+  /** Deposit history for goals — CONFIRMED, dated contributions with evidence. */
+  goalContributions: GoalContribution[];
   /** Automation rules are DRAFT data only; Milestone A never executes them. */
   automationRules: AutomationRule[];
 }
@@ -406,6 +409,25 @@ const goals: Goal[] = [
   },
 ];
 
+/**
+ * CONFIRMED goal contributions — dated, sourced, each pointing at the
+ * transaction that is its evidence. There is exactly ONE in the demo because
+ * there is exactly one savings transfer on record; nothing is invented to make
+ * the history look fuller. The current goal balance comes from the account
+ * record (goal.savedCents), not from this list.
+ */
+const goalContributions: GoalContribution[] = [
+  {
+    id: "gc-emergency-0902",
+    goalId: "goal-emergency",
+    amountCents: 20000,
+    date: "2026-09-02",
+    source: "userEntered",
+    confirmed: true,
+    note: "Matches the $200.00 transfer to High-Yield Savings on record (txn-savings-xfer-0902).",
+  },
+];
+
 const givingPlan: GivingPlan = {
   id: "giv-plan",
   // Fixed amount — NO preselected percentage anywhere in the demo.
@@ -455,6 +477,7 @@ const automationRules: AutomationRule[] = [
     simulated: true,
     authorizedAt: null,
     revokedAt: null,
+    linkedDebtId: "debt-card",
     source: DEMO,
   },
   {
@@ -473,6 +496,7 @@ const automationRules: AutomationRule[] = [
     simulated: true,
     authorizedAt: null,
     revokedAt: null,
+    linkedDebtId: "debt-auto",
     source: DEMO,
   },
 ];
@@ -809,6 +833,7 @@ export function createDemoSnapshot(): DemoSnapshot {
     debts,
     goals,
     givingPlan,
+    goalContributions,
     automationRules,
   });
 }

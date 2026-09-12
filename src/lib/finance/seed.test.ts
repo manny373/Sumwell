@@ -56,6 +56,30 @@ describe("demo snapshot — deterministic and clearly synthetic", () => {
     expect(accounts).toHaveLength(2);
   });
 
+  test("confirmed goal contributions are dated, sourced, and evidence-linked", () => {
+    const seed = createDemoSnapshot();
+    expect(seed.goalContributions).toHaveLength(1);
+    const contrib = seed.goalContributions[0];
+    expect(contrib.confirmed).toBe(true);
+    expect(contrib.source).not.toBe("projected");
+    expect(contrib.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(contrib.amountCents).toBe(20000);
+    expect(contrib.note).toContain("txn-savings-xfer-0902");
+    // The evidence transaction really exists and matches the amount.
+    const transfer = seed.transactions.find((t) => t.id === "txn-savings-xfer-0902")!;
+    expect(Math.abs(transfer.amountCents)).toBe(contrib.amountCents);
+  });
+
+  test("formula automation rules resolve their linked debt in the same seed", () => {
+    const seed = createDemoSnapshot();
+    for (const rule of seed.automationRules) {
+      if (rule.amountType === "formula") {
+        expect(rule.linkedDebtId).not.toBeNull();
+        expect(seed.debts.some((d) => d.id === rule.linkedDebtId)).toBe(true);
+      }
+    }
+  });
+
   test("all money fields are safe integers (no floats on the money path)", () => {
     const seed = createDemoSnapshot();
     for (const a of seed.accounts) {

@@ -23,6 +23,20 @@ describe("demoHousehold", () => {
     expect(household.assumptions.goalContributions).toEqual([
       { goalId: "goal-emergency", name: "Emergency fund", amountCents: 20000 },
     ]);
+    expect(household.assumptions.debtExtraBudgetCents).toBe(25000); // $250/mo
+  });
+
+  test("carries the confirmed goal contributions from the snapshot", () => {
+    const household = demoHousehold();
+    const snapshot = createDemoSnapshot();
+    expect(household.goalContributions).toEqual(snapshot.goalContributions);
+    expect(household.goalContributions).toHaveLength(1);
+    expect(household.goalContributions[0]).toMatchObject({
+      goalId: "goal-emergency",
+      amountCents: 20000,
+      confirmed: true,
+      date: "2026-09-02",
+    });
   });
 });
 
@@ -102,9 +116,11 @@ describe("manualHouseholdFor", () => {
       goalContributions: [
         { goalId: "goal-manual", name: "Emergency fund", amountCents: 20000 },
       ],
+      debtExtraBudgetCents: 0,
     });
     expect(h.transactions).toEqual([]);
     expect(h.debts).toEqual([]);
+    expect(h.goalContributions).toEqual([]);
   });
 
   test("percent giving stores basis points and stays enabled", () => {

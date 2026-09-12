@@ -22,6 +22,7 @@ import type {
   Debt,
   GivingPlan,
   Goal,
+  GoalContribution,
   Obligation,
   Paycheck,
   Transaction,
@@ -42,6 +43,12 @@ export interface PlanAssumptions {
   bufferCents: number;
   /** Goal contributions the user accepted for this period. */
   goalContributions: AcceptedGoalContribution[];
+  /**
+   * Monthly extra-payment budget for debt, in cents. Optional so households
+   * persisted before Phase 3b (without the field) still load; helpers fall
+   * back to a per-source default (demo $250/mo, manual $0).
+   */
+  debtExtraBudgetCents?: number;
 }
 
 export type HouseholdSource = "demo" | "manual";
@@ -61,6 +68,12 @@ export interface Household {
   obligations: Obligation[];
   debts: Debt[];
   goals: Goal[];
+  /**
+   * CONFIRMED goal-deposit history (dated, sourced, evidence-linked). Older
+   * persisted households may lack the field — read through
+   * `householdGoalContributions` which falls back to [].
+   */
+  goalContributions: GoalContribution[];
   givingPlan: GivingPlan;
   automationRules: AutomationRule[];
   assumptions: PlanAssumptions;

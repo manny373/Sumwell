@@ -58,7 +58,7 @@ export function nextPaycheck(household: Household): Paycheck | null {
 }
 
 /** The most recent received paycheck, or null (manual path has none yet). */
-function lastReceivedPaycheck(household: Household): Paycheck | null {
+export function lastReceivedPaycheck(household: Household): Paycheck | null {
   const received = household.paychecks
     .filter((p) => p.received)
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
@@ -95,6 +95,19 @@ function inWindow(
   if (!lastReceived) return true;
   const occurrence = nextObligationDate(obligation, lastReceived.date);
   return occurrence !== null && occurrence <= nextPay.date;
+}
+
+/**
+ * The obligations the CURRENT paycheck window must cover — the shared source
+ * of truth for the Home "remaining money" line and the Plan "bills" section.
+ */
+export function cycleObligations(household: Household): Obligation[] {
+  const paycheck = nextPaycheck(household);
+  if (!paycheck) return [];
+  const lastReceived = lastReceivedPaycheck(household);
+  return household.obligations.filter((o) =>
+    inWindow(o, lastReceived, paycheck),
+  );
 }
 
 /**
@@ -181,10 +194,7 @@ export function buildHomePlan(
     return { reason: "stale", plan: null };
   }
 
-  const lastReceived = lastReceivedPaycheck(household);
-  const obligations = household.obligations.filter((o) =>
-    inWindow(o, lastReceived, paycheck),
-  );
+  const obligations = cycleObligations(household);
 
   const availableCents = eligibleAvailableCents(household, paycheck);
   if (availableCents === null) {

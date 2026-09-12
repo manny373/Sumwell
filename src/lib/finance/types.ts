@@ -269,6 +269,12 @@ export interface AutomationRule {
   /** Explicit authorization record (data), when given. */
   authorizedAt: string | null;
   revokedAt: string | null;
+  /**
+   * Debt this rule pays (when formula/destination target a debt). Lets the
+   * preview resolve "minimumPayment" without guessing. Optional — a rule with
+   * no linked debt and a formula amount simply has no resolvable amount.
+   */
+  linkedDebtId?: string | null;
   source: DataSource;
 }
 
