@@ -1,0 +1,365 @@
+/* ============================================================================
+   SUMMELL BRAND SYSTEM — the single configurable brand module.
+
+   Every brand value lives in this file. To re-skin the app, edit the hex
+   values / scales below; nothing else in the codebase holds raw brand colors.
+
+   Structure:
+     1. Stored values  — `--sw-*` raw palette, defined per theme (:root light,
+        .dark dark). These are the ground truth.
+     2. Token wiring   — `@theme inline` maps Tailwind utilities (bg-surface,
+        text-brand-600, rounded-card, …) to the stored variables, so utilities
+        re-resolve at runtime when the theme flips.
+     3. Type scale     — display/heading/body/caption + large numeric figures.
+     4. Spacing, radius, elevation, motion.
+     5. Base styles & reduced-motion handling.
+   ========================================================================== */
+
+@import "tailwindcss";
+
+/* Class-based dark mode: `.dark` on <html> (set by ThemeProvider / init script). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------- 1. Palette */
+
+:root {
+  /* Surfaces — warm off-white */
+  --sw-surface: #faf8f3;
+  --sw-surface-raised: #ffffff;
+  --sw-surface-sunken: #f2eee5;
+  --sw-overlay: #ffffff;
+
+  /* Ink — warm dark text */
+  --sw-ink: #1c2b28;
+  --sw-ink-muted: #4c5a56;
+  --sw-ink-faint: #84908c;
+  --sw-ink-inverse: #ffffff;
+
+  /* Lines */
+  --sw-line: #e6e0d4;
+  --sw-line-strong: #d3cabb;
+  --sw-line-faint: #efeae0;
+
+  /* Brand — deep teal */
+  --sw-brand-50: #eef6f5;
+  --sw-brand-100: #d8ecea;
+  --sw-brand-200: #b0d9d6;
+  --sw-brand-300: #84c0bc;
+  --sw-brand-400: #55a4a0;
+  --sw-brand-500: #338682;
+  --sw-brand-600: #1f6e6b;
+  --sw-brand-700: #1a5a58;
+  --sw-brand-800: #164a48;
+  --sw-brand-900: #123b3a;
+  --sw-brand-950: #0a2423;
+
+  /* Accent — restrained green */
+  --sw-accent-50: #f2f6f1;
+  --sw-accent-100: #e1ebdd;
+  --sw-accent-200: #c4d7be;
+  --sw-accent-300: #9fbe97;
+  --sw-accent-400: #7aa272;
+  --sw-accent-500: #5c894f;
+  --sw-accent-600: #466e3e;
+  --sw-accent-700: #395831;
+  --sw-accent-800: #2e4728;
+  --sw-accent-900: #253b20;
+  --sw-accent-950: #101f0e;
+
+  /* Status */
+  --sw-success: #2f5e3c;
+  --sw-success-soft: #e8f3ea;
+  --sw-warning: #96611c;
+  --sw-warning-soft: #faf0df;
+  --sw-danger: #b3392e;
+  --sw-danger-soft: #f9e7e4;
+  --sw-info: #1f6e6b;
+  --sw-info-soft: #e7f2f1;
+
+  /* Focus ring, sheet scrim */
+  --sw-focus: #1f6e6b;
+  --sw-scrim: rgb(16 26 24 / 0.45);
+
+  /* Elevation */
+  --sw-shadow-card: 0 1px 2px rgb(28 43 40 / 0.06), 0 2px 10px rgb(28 43 40 / 0.05);
+  --sw-shadow-pop: 0 2px 6px rgb(28 43 40 / 0.06), 0 12px 32px rgb(28 43 40 / 0.14);
+}
+
+.dark {
+  /* Surfaces — warm-tinted charcoal */
+  --sw-surface: #101816;
+  --sw-surface-raised: #18211f;
+  --sw-surface-sunken: #0c1312;
+  --sw-overlay: #1b2523;
+
+  /* Ink */
+  --sw-ink: #e9efec;
+  --sw-ink-muted: #9ba8a4;
+  --sw-ink-faint: #6d7a76;
+  --sw-ink-inverse: #101816;
+
+  /* Lines */
+  --sw-line: #293430;
+  --sw-line-strong: #394742;
+  --sw-line-faint: #222c29;
+
+  /* Brand — brighter teals on dark; usage shifts to the bright end of the
+     scale (e.g. bg-brand-100 = subtle tint, text-brand-900 = bright). */
+  --sw-brand-50: #122b2a;
+  --sw-brand-100: #173736;
+  --sw-brand-200: #1e4847;
+  --sw-brand-300: #285b58;
+  --sw-brand-400: #34716e;
+  --sw-brand-500: #418986;
+  --sw-brand-600: #54a19e;
+  --sw-brand-700: #64b1ae;
+  --sw-brand-800: #82c4c1;
+  --sw-brand-900: #a6d7d4;
+  --sw-brand-950: #d4ecea;
+
+  /* Accent */
+  --sw-accent-50: #162418;
+  --sw-accent-100: #1c2e1f;
+  --sw-accent-200: #243d27;
+  --sw-accent-300: #2f5233;
+  --sw-accent-400: #3c6742;
+  --sw-accent-500: #4d8054;
+  --sw-accent-600: #609a67;
+  --sw-accent-700: #75b17c;
+  --sw-accent-800: #97cb9e;
+  --sw-accent-900: #c0e4c5;
+  --sw-accent-950: #e4f3e6;
+
+  /* Status */
+  --sw-success: #86cd92;
+  --sw-success-soft: #16311d;
+  --sw-warning: #dcae5e;
+  --sw-warning-soft: #332710;
+  --sw-danger: #e18075;
+  --sw-danger-soft: #3a1e1b;
+  --sw-info: #6fc8c5;
+  --sw-info-soft: #133130;
+
+  /* Focus ring, sheet scrim */
+  --sw-focus: #5fc0bc;
+  --sw-scrim: rgb(4 8 7 / 0.62);
+
+  /* Elevation — deeper on dark */
+  --sw-shadow-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 2px 12px rgb(0 0 0 / 0.35);
+  --sw-shadow-pop: 0 2px 8px rgb(0 0 0 / 0.5), 0 16px 40px rgb(0 0 0 / 0.6);
+}
+
+/* ------------------------------------------------- 2. Token wiring (Tailwind) */
+
+:root {
+  --sw-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --sw-font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas,
+    monospace;
+}
+
+@theme inline {
+  --font-sans: var(--sw-font-sans);
+  --font-mono: var(--sw-font-mono);
+
+  /* Surfaces */
+  --color-surface: var(--sw-surface);
+  --color-surface-raised: var(--sw-surface-raised);
+  --color-surface-sunken: var(--sw-surface-sunken);
+  --color-overlay: var(--sw-overlay);
+
+  /* Ink */
+  --color-ink: var(--sw-ink);
+  --color-ink-muted: var(--sw-ink-muted);
+  --color-ink-faint: var(--sw-ink-faint);
+  --color-ink-inverse: var(--sw-ink-inverse);
+
+  /* Lines */
+  --color-line: var(--sw-line);
+  --color-line-strong: var(--sw-line-strong);
+  --color-line-faint: var(--sw-line-faint);
+
+  /* Brand (deep teal) + accent (restrained green) */
+  --color-brand-50: var(--sw-brand-50);
+  --color-brand-100: var(--sw-brand-100);
+  --color-brand-200: var(--sw-brand-200);
+  --color-brand-300: var(--sw-brand-300);
+  --color-brand-400: var(--sw-brand-400);
+  --color-brand-500: var(--sw-brand-500);
+  --color-brand-600: var(--sw-brand-600);
+  --color-brand-700: var(--sw-brand-700);
+  --color-brand-800: var(--sw-brand-800);
+  --color-brand-900: var(--sw-brand-900);
+  --color-brand-950: var(--sw-brand-950);
+
+  --color-accent-50: var(--sw-accent-50);
+  --color-accent-100: var(--sw-accent-100);
+  --color-accent-200: var(--sw-accent-200);
+  --color-accent-300: var(--sw-accent-300);
+  --color-accent-400: var(--sw-accent-400);
+  --color-accent-500: var(--sw-accent-500);
+  --color-accent-600: var(--sw-accent-600);
+  --color-accent-700: var(--sw-accent-700);
+  --color-accent-800: var(--sw-accent-800);
+  --color-accent-900: var(--sw-accent-900);
+  --color-accent-950: var(--sw-accent-950);
+
+  /* Status */
+  --color-success: var(--sw-success);
+  --color-success-soft: var(--sw-success-soft);
+  --color-warning: var(--sw-warning);
+  --color-warning-soft: var(--sw-warning-soft);
+  --color-danger: var(--sw-danger);
+  --color-danger-soft: var(--sw-danger-soft);
+  --color-info: var(--sw-info);
+  --color-info-soft: var(--sw-info-soft);
+
+  /* Focus + scrim */
+  --color-focus: var(--sw-focus);
+  --color-scrim: var(--sw-scrim);
+
+  /* Elevation */
+  --shadow-card: var(--sw-shadow-card);
+  --shadow-pop: var(--sw-shadow-pop);
+
+  /* ------------------------------------------------- 3. Type scale */
+
+  --text-display: 2.5rem;
+  --text-display--line-height: 1.06;
+  --text-display--font-weight: 700;
+  --text-display--letter-spacing: -0.02em;
+
+  --text-h1: 1.75rem;
+  --text-h1--line-height: 1.16;
+  --text-h1--font-weight: 700;
+  --text-h1--letter-spacing: -0.015em;
+
+  --text-h2: 1.375rem;
+  --text-h2--line-height: 1.25;
+  --text-h2--font-weight: 600;
+  --text-h2--letter-spacing: -0.01em;
+
+  --text-h3: 1.125rem;
+  --text-h3--line-height: 1.3;
+  --text-h3--font-weight: 600;
+
+  --text-h4: 1rem;
+  --text-h4--line-height: 1.4;
+  --text-h4--font-weight: 600;
+
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.55;
+
+  --text-body-sm: 0.875rem;
+  --text-body-sm--line-height: 1.5;
+
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.4;
+  --text-caption--font-weight: 500;
+  --text-caption--letter-spacing: 0.01em;
+
+  /* Large financial numerals — pair with the `tabular-nums` utility */
+  --text-num-xl: 2.25rem;
+  --text-num-xl--line-height: 1.1;
+  --text-num-xl--font-weight: 600;
+  --text-num-xl--letter-spacing: -0.02em;
+
+  --text-num-lg: 1.375rem;
+  --text-num-lg--line-height: 1.15;
+  --text-num-lg--font-weight: 600;
+  --text-num-lg--letter-spacing: -0.01em;
+
+  --text-num: 1rem;
+  --text-num--line-height: 1.3;
+  --text-num--font-weight: 600;
+
+  /* ------------------------------------------------- 4. Spacing / radius */
+
+  --spacing-page: 1rem;
+  --spacing-section: 2rem;
+  --spacing-card: 1.25rem;
+  --spacing-stack: 1.5rem;
+
+  --radius-control: 0.625rem;
+  --radius-card: 1rem;
+  --radius-sheet: 1.25rem;
+  --radius-pill: 999px;
+
+  /* ----------------------------------------------------- Motion */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-fade-in: fade-in 200ms var(--ease-standard) both;
+  --animate-rise-in: rise-in 280ms var(--ease-emphasized) both;
+  --animate-scale-in: scale-in 160ms var(--ease-standard) both;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(28px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* ------------------------------------------------- 5. Base styles */
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--sw-surface);
+    color: var(--sw-ink);
+    font-family: var(--sw-font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background-color: color-mix(in oklab, var(--sw-brand-600) 22%, transparent);
+  }
+  /* Consistent keyboard focus everywhere a control can receive it. */
+  :focus-visible {
+    outline: 2px solid var(--sw-focus);
+    outline-offset: 2px;
+  }
+  /* Native controls get a pointer cursor (Tailwind v4 preflight makes them default). */
+  button:not(:disabled),
+  [role="button"]:not(:disabled),
+  select:not(:disabled),
+  label[for] {
+    cursor: pointer;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+/* Respect reduced motion: collapse animation/transition durations to ~0. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
