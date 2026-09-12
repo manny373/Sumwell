@@ -22,7 +22,7 @@ export type TabId = (typeof TABS)[number]["id"];
 function DemoChip() {
   return (
     <span className="rounded-pill border border-warning/40 bg-warning-soft px-2.5 py-1 text-caption font-semibold text-warning">
-      Demo
+      Prototype
     </span>
   );
 }

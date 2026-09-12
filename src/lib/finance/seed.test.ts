@@ -90,11 +90,11 @@ describe("demo snapshot — deterministic and clearly synthetic", () => {
       .filter((t) => t.accountId === "acc-checking" && t.status === "pending")
       .reduce((s, t) => s + Math.abs(t.amountCents), 0);
     expect(pending).toBe(4217);
-    expect(checking.currentBalanceCents! - pending).toBe(checking.availableBalanceCents);
+    expect(checking.currentBalanceCents! - pending).toBe(checking.availableBalanceCents!);
 
     const savings = seed.accounts.find((a) => a.id === "acc-savings")!;
     const emergency = seed.goals.find((g) => g.id === "goal-emergency")!;
-    expect(emergency.savedCents).toBe(savings.currentBalanceCents);
+    expect(emergency.savedCents).toBe(savings.currentBalanceCents!);
   });
 
   test("loan payment split is consistent with the stated balance and interest rate", () => {
