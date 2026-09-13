@@ -509,7 +509,11 @@ function GivingSection({ household }: { household: Household }) {
   const skipped = view.impact?.skipped ?? true;
 
   return (
-    <section aria-labelledby="plan-giving">
+    <section
+      id="giving"
+      aria-labelledby="plan-giving"
+      className="scroll-mt-24"
+    >
       <SectionHeading
         step="4"
         title="Giving (optional)"

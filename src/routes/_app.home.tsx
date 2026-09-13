@@ -4,7 +4,7 @@ import { Banner } from "~/components/Banner";
 import { Button, buttonClass } from "~/components/Button";
 import { LoadingState } from "~/components/LoadingState";
 import { Money } from "~/components/Money";
-import { ChevronRightIcon } from "~/components/icons";
+import { ChevronRightIcon, HeartIcon } from "~/components/icons";
 import { useClientData } from "~/lib/client/store";
 import { buildHomePlan, daysUntilDue, type HomePlan } from "~/lib/client/plan";
 import { formatDollars } from "~/lib/money";
@@ -326,6 +326,46 @@ function AccountsCard({ household }: { household: Household }) {
   );
 }
 
+/* ------------------------------- giving shortcut (frequent givers) --- */
+
+/**
+ * Spec: frequent-giving households get an optional shortcut. Only shown when
+ * the household has an ACTIVE giving plan and this cycle actually includes
+ * giving; jumps straight to the Giving section on Plan.
+ */
+function GivingShortcutCard({ givingCents }: { givingCents: number | null }) {
+  return (
+    <Card interactive padded={false} className="overflow-hidden">
+      <Link
+        to="/plan"
+        hash="giving"
+        className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-surface-sunken"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            aria-hidden="true"
+            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-800 dark:bg-brand-100/40 dark:text-brand-900"
+          >
+            <HeartIcon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-h4 text-ink">Giving plan</p>
+            <p className="mt-0.5 truncate text-body-sm text-ink-muted">
+              {givingCents !== null
+                ? `${formatDollars(givingCents)} planned this cycle · optional, your choice`
+                : "Optional, your choice — view in Plan"}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1 text-body-sm font-medium text-ink-muted">
+          View in Plan
+          <ChevronRightIcon className="h-5 w-5 shrink-0 text-ink-faint" />
+        </div>
+      </Link>
+    </Card>
+  );
+}
+
 /* ------------------------------------------------------- honest states */
 
 function StaleView({ household }: { household: Household }) {
@@ -446,6 +486,9 @@ function HomeRoute() {
           <RemainingMoneyCard plan={ctx.plan} household={household} />
           <NextObligationCard plan={ctx.plan} />
           <NextActionCard plan={ctx.plan} />
+          {household.givingPlan.enabled ? (
+            <GivingShortcutCard givingCents={ctx.plan.givingCents} />
+          ) : null}
           <AccountsCard household={household} />
         </>
       ) : null}

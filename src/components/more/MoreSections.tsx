@@ -1,54 +1,98 @@
+import type { ReactNode } from "react";
 import { Card } from "~/components/Card";
-import { ShieldIcon } from "~/components/icons";
+import {
+  CardIcon,
+  ChevronRightIcon,
+  LockIcon,
+  QuestionIcon,
+  SearchIcon,
+  SlidersIcon,
+} from "~/components/icons";
+
+/** The five sections reachable from the More tab. */
+export type MoreSectionId =
+  | "credit"
+  | "discover"
+  | "support"
+  | "privacy"
+  | "settings";
+
+const SECTIONS: Array<{
+  id: MoreSectionId;
+  title: string;
+  blurb: string;
+  icon: (props: { className?: string }) => ReactNode;
+}> = [
+  {
+    id: "credit",
+    title: "Credit",
+    blurb: "No provider is connected — an honest look at what that means.",
+    icon: CardIcon,
+  },
+  {
+    id: "discover",
+    title: "Discover",
+    blurb: "Labeled synthetic sample offers only — no real products, no approval guesses.",
+    icon: SearchIcon,
+  },
+  {
+    id: "support",
+    title: "Support",
+    blurb: "How the prototype works and what it can't do. Not real support.",
+    icon: QuestionIcon,
+  },
+  {
+    id: "privacy",
+    title: "Privacy",
+    blurb: "Where your data lives and what never leaves this device.",
+    icon: LockIcon,
+  },
+  {
+    id: "settings",
+    title: "Settings",
+    blurb: "Assumptions, theme, export, and start over.",
+    icon: SlidersIcon,
+  },
+];
 
 /**
- * The rest of the More tab — honest placeholder states for Credit, Discover,
- * Support, Privacy, and Settings. Everything here says "not available /
- * prototype", never implying a real service exists.
+ * The rest of the More tab — an index into the five honest section screens.
+ * Every entry keeps the "not real / prototype" framing visible.
  */
-export function MoreSections() {
+export function MoreSections({ onOpen }: { onOpen(id: MoreSectionId): void }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <Card padded>
-        <p className="text-body font-semibold text-ink">Credit</p>
-        <p className="mt-1 text-body-sm text-ink-muted">
-          Not available in the prototype. No credit provider is connected, so there is no credit
-          monitoring and no score here — and Sumwell never manufactures a score from your
-          transactions.
-        </p>
-      </Card>
-      <Card padded>
-        <p className="text-body font-semibold text-ink">Discover</p>
-        <p className="mt-1 text-body-sm text-ink-muted">
-          Labeled synthetic offers only (Milestone A). Any sample offer shown is marked as a demo,
-          with full terms stored as data — Sumwell never invents approval odds.
-        </p>
-      </Card>
-      <Card padded>
-        <p className="text-body font-semibold text-ink">Support</p>
-        <p className="mt-1 text-body-sm text-ink-muted">
-          This is a prototype for design review. Questions go to the founder during the Milestone A
-          checkpoint.
-        </p>
-      </Card>
-      <Card padded>
-        <p className="text-body font-semibold text-ink">Privacy</p>
-        <p className="mt-1 text-body-sm text-ink-muted">
-          In this prototype your data lives only on this device (local storage). Nothing is sent to
-          a server, and no bank, credit bureau, or partner sees it.
-        </p>
-      </Card>
-      <Card padded>
-        <p className="flex items-center gap-1.5 text-body font-semibold text-ink">
-          <ShieldIcon className="h-4 w-4 text-ink-faint" />
-          Settings
-        </p>
-        <p className="mt-1 text-body-sm text-ink-muted">
-          Theme (light/dark) lives in the header. Data can be exported or deleted from the actions
-          above; “Start over” is available from the Home tab. There is no account, login, or
-          cloud sync in the prototype.
-        </p>
-      </Card>
-    </div>
+    <nav aria-label="More sections" className="flex flex-col gap-3">
+      <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
+        More
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {SECTIONS.map((s) => (
+          <Card key={s.id} interactive padded={false} className="overflow-hidden">
+            <button
+              type="button"
+              onClick={() => onOpen(s.id)}
+              className="flex w-full items-center gap-3 px-4 py-4 text-left transition-colors hover:bg-surface-sunken focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/40"
+            >
+              <span
+                aria-hidden="true"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-800 dark:bg-brand-100/40 dark:text-brand-900"
+              >
+                <s.icon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-body font-semibold text-ink">{s.title}</span>
+                <span className="mt-0.5 block text-body-sm leading-snug text-ink-muted">
+                  {s.blurb}
+                </span>
+              </span>
+              <ChevronRightIcon
+                className="h-5 w-5 shrink-0 text-ink-faint"
+                aria-hidden="true"
+              />
+            </button>
+          </Card>
+        ))}
+      </div>
+    </nav>
   );
 }

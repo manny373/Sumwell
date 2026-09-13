@@ -15,7 +15,12 @@ import { ALL_ACCOUNTS, TransactionsView } from "~/components/more/TransactionsVi
 import { AddAccountSheet, AddTransactionSheet } from "~/components/more/FormsSheets";
 import { ImportSheet } from "~/components/more/ImportSheet";
 import { ExportSheet } from "~/components/more/ExportSheet";
-import { MoreSections } from "~/components/more/MoreSections";
+import { MoreSections, type MoreSectionId } from "~/components/more/MoreSections";
+import { CreditView } from "~/components/more/sections/CreditView";
+import { DiscoverView } from "~/components/more/sections/DiscoverView";
+import { SupportView } from "~/components/more/sections/SupportView";
+import { PrivacyView } from "~/components/more/sections/PrivacyView";
+import { SettingsView } from "~/components/more/sections/SettingsView";
 import {
   DownloadIcon,
   PlusIcon,
@@ -27,7 +32,10 @@ export const Route = createFileRoute("/_app/more")({
   component: MoreRoute,
 });
 
-type View = { kind: "accounts" } | { kind: "transactions"; accountId: string };
+type View =
+  | { kind: "accounts" }
+  | { kind: "transactions"; accountId: string }
+  | { kind: "section"; section: MoreSectionId };
 
 function MoreRoute() {
   const { status, onboarded, loadError, household, startOver } = useClientData();
@@ -188,13 +196,19 @@ function MoreRoute() {
           ) : null}
 
           {/* the rest of More */}
-          <MoreSections />
+          <MoreSections onOpen={(section) => setView({ kind: "section", section })} />
 
           <p className="text-caption text-ink-faint">
             Prototype only — not a financial service. No bank connections, no real money, no credit
             pulls. Data lives on this device.
           </p>
         </div>
+      ) : view.kind === "section" ? (
+        <SectionView
+          section={view.section}
+          household={household}
+          onBack={() => setView({ kind: "accounts" })}
+        />
       ) : (
         <TransactionsView
           household={household}
@@ -223,4 +237,28 @@ function MoreRoute() {
       <ExportSheet open={exportOpen} household={household} onClose={() => setExportOpen(false)} />
     </div>
   );
+}
+
+/** One of the five More section screens (Credit / Discover / Support / Privacy / Settings). */
+function SectionView({
+  section,
+  household,
+  onBack,
+}: {
+  section: MoreSectionId;
+  household: NonNullable<ReturnType<typeof useClientData>["household"]>;
+  onBack: () => void;
+}) {
+  switch (section) {
+    case "credit":
+      return <CreditView household={household} onBack={onBack} />;
+    case "discover":
+      return <DiscoverView household={household} onBack={onBack} />;
+    case "support":
+      return <SupportView onBack={onBack} />;
+    case "privacy":
+      return <PrivacyView onBack={onBack} onDeleted={onBack} />;
+    case "settings":
+      return <SettingsView household={household} onBack={onBack} />;
+  }
 }
