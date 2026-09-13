@@ -62,6 +62,8 @@ export interface Account {
   creditLimitCents: number | null;
   /** The institution's own id when connected; null when demo/manual. */
   externalId: string | null;
+  /** Display name of the institution the account lives at (synthetic for demo). */
+  institution: string | null;
   /** ISO date the account was opened, when known. */
   openedAt: string | null;
   /** ISO timestamp — when the balance/source data was last updated. */
@@ -107,6 +109,14 @@ export interface Transaction {
   principalCents: number | null;
   /** Loan payments: interest portion. null when not a loan payment. */
   interestCents: number | null;
+  /**
+   * When set, this transaction was reviewed and marked as a duplicate of
+   * `duplicateOf` and is excluded from spending/income totals. Absent = not
+   * flagged as a duplicate.
+   */
+  duplicateOf?: string | null;
+  /** User reviewed a possible-duplicate flag and chose to keep this row. */
+  duplicateIgnored?: boolean;
   source: DataSource;
 }
 

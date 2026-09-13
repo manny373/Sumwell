@@ -90,6 +90,22 @@ export function loadPersisted(storage: StorageLike | null): PersistedAppState | 
   }
 }
 
+/**
+ * True when a saved payload EXISTS but could not be read (corrupt JSON or a
+ * shape this version no longer understands). Distinct from "nothing saved
+ * yet", which is a normal first-visit state and never an error.
+ */
+export function storageIsCorrupt(storage: StorageLike | null): boolean {
+  if (!storage) return false;
+  try {
+    const raw = storage.getItem(STORAGE_KEY);
+    if (raw === null || raw === "") return false;
+    return loadPersisted(storage) === null;
+  } catch {
+    return false;
+  }
+}
+
 /** Save the app state (best-effort). */
 export function savePersisted(state: PersistedAppState | null, storage: StorageLike | null): void {
   if (!storage) return;

@@ -1,24 +1,226 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Placeholder } from "~/components/Placeholder";
-import { MoreIcon } from "~/components/icons";
+import { useState } from "react";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Card } from "~/components/Card";
+import { Banner } from "~/components/Banner";
+import { Button, buttonClass } from "~/components/Button";
+import { Skeleton } from "~/components/LoadingState";
+import { Money } from "~/components/Money";
+import { useClientData } from "~/lib/client/store";
+import { buildHomePlan } from "~/lib/client/plan";
+import { todayISO } from "~/lib/client/dates";
+import { formatDollars } from "~/lib/money";
+import { SourceTimeCaption } from "~/components/more/bits";
+import { AccountCard } from "~/components/more/AccountCard";
+import { ALL_ACCOUNTS, TransactionsView } from "~/components/more/TransactionsView";
+import { AddAccountSheet, AddTransactionSheet } from "~/components/more/FormsSheets";
+import { ImportSheet } from "~/components/more/ImportSheet";
+import { ExportSheet } from "~/components/more/ExportSheet";
+import { MoreSections } from "~/components/more/MoreSections";
+import {
+  DownloadIcon,
+  PlusIcon,
+  UploadIcon,
+  WalletIcon,
+} from "~/components/icons";
 
 export const Route = createFileRoute("/_app/more")({
   component: MoreRoute,
 });
 
+type View = { kind: "accounts" } | { kind: "transactions"; accountId: string };
+
 function MoreRoute() {
+  const { status, onboarded, loadError, household, startOver } = useClientData();
+  const navigate = useNavigate();
+  const [view, setView] = useState<View>({ kind: "accounts" });
+  const [addAccountOpen, setAddAccountOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [addTxnTarget, setAddTxnTarget] = useState<string | null>(null);
+  const [sheetNonce, setSheetNonce] = useState(0);
+
+  const openAddTxn = (accountId: string | null) => {
+    setAddTxnTarget(accountId);
+    setSheetNonce((n) => n + 1);
+  };
+
+  if (status !== "ready" || !household) {
+    // Loading skeleton (the shell normally gates on ready; belt-and-braces).
+    if (!onboarded && status === "ready") {
+      return <Card>No household yet — <Link to="/setup" className="font-semibold text-brand-700 underline-offset-2 hover:underline dark:text-brand-500">set up your numbers</Link>.</Card>;
+    }
+    return (
+      <div className="flex flex-col gap-4" aria-hidden="true">
+        <Skeleton className="h-9 w-48" />
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-28 w-full" />
+        <Skeleton className="h-28 w-full" />
+        <span className="sr-only">Loading accounts…</span>
+      </div>
+    );
+  }
+
+  const now = todayISO();
+  const planCtx = buildHomePlan(household, now);
+  const planStale = planCtx.reason === "stale";
+  const demoAccount = household.accounts[0];
+
   return (
-    <Placeholder
-      icon={<MoreIcon className="h-5 w-5" />}
-      title="More"
-      description="Everything else: complete accounts and transactions, Credit, Discover, support, privacy, and settings."
-      items={[
-        "Complete accounts & transactions (checking, savings, cards, loans, retirement, manual assets)",
-        "Credit — truthful status page, no manufactured scores",
-        "Discover — labeled synthetic offers only, with full terms",
-        "Support, privacy, and settings",
-        "CSV import, export, and deletion flows",
-      ]}
-    />
+    <div className="flex flex-col gap-6">
+      {view.kind === "accounts" ? (
+        <div className="flex flex-col gap-4">
+          {/* header */}
+          <header>
+            <div className="flex items-center justify-between gap-3">
+              <h1 className="text-h1 text-ink">More</h1>
+              {household ? (
+                <SourceTimeCaption source={household.source} updatedAt={household.generatedAt} />
+              ) : null}
+            </div>
+            <p className="mt-1 text-body-sm text-ink-muted">
+              Accounts, transactions, and everything else — all synthetic or entered by hand.
+            </p>
+          </header>
+
+          {/* honest states */}
+          {loadError ? (
+            <Banner
+              variant="error"
+              title="We couldn't read your saved data"
+              description="The data on this device didn't load (it may be from an older version or incomplete). Nothing is lost anywhere else — this prototype only stores data on this device."
+              action={
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    startOver();
+                    void navigate({ to: "/" });
+                  }}
+                >
+                  Start over
+                </Button>
+              }
+            />
+          ) : null}
+
+          {planStale ? (
+            <Banner
+              variant="stale"
+              title="These numbers are out of date"
+              description={`The next paycheck modeled in this household has already passed, so plans built from it would be guesswork. You can still review accounts and transactions below.`}
+            />
+          ) : null}
+
+          {/* actions */}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => { setAddAccountOpen(true); setSheetNonce((n) => n + 1); }}>
+              <PlusIcon className="h-4 w-4" />
+              Add account
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => openAddTxn(household.accounts.some((a) => a.type === "checking") ? (household.accounts.find((a) => a.type === "checking")?.id ?? null) : null)}>
+              <PlusIcon className="h-4 w-4" />
+              Add transaction
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setImportOpen(true)}>
+              <UploadIcon className="h-4 w-4" />
+              Import CSV
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => setExportOpen(true)}>
+              <DownloadIcon className="h-4 w-4" />
+              Export
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setView({ kind: "transactions", accountId: ALL_ACCOUNTS })}>
+              All transactions
+            </Button>
+          </div>
+
+          {/* accounts list */}
+          {household.accounts.length === 0 ? (
+            <Card>
+              <div className="flex flex-col items-center justify-center gap-2 px-4 py-12 text-center">
+                <span className="grid h-12 w-12 place-items-center rounded-full bg-brand-100 text-brand-800 dark:bg-brand-100/40 dark:text-brand-900">
+                  <WalletIcon className="h-6 w-6" />
+                </span>
+                <h2 className="text-h3 text-ink">No accounts yet</h2>
+                <p className="max-w-sm text-body-sm text-ink-muted">
+                  Add your first account by hand, or start from your onboarding numbers. Nothing
+                  here is connected to a real bank.
+                </p>
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  <Button size="sm" onClick={() => { setAddAccountOpen(true); setSheetNonce((n) => n + 1); }}>
+                    <PlusIcon className="h-4 w-4" />
+                    Add account
+                  </Button>
+                  <Link to="/setup" className={buttonClass("secondary", "sm")}>
+                    Edit onboarding numbers
+                  </Link>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
+                Accounts · tap for transactions
+              </p>
+              {household.accounts.map((account) => (
+                <AccountCard
+                  key={account.id}
+                  account={account}
+                  onOpen={() => setView({ kind: "transactions", accountId: account.id })}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* quick view for the first account's balance */}
+          {demoAccount && demoAccount.availableBalanceCents !== null ? (
+            <Card className="border-brand-200/60 bg-brand-50/60 dark:bg-brand-100/20">
+              <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
+                Quick check
+              </p>
+              <p className="mt-1.5 text-body-sm text-ink-muted">
+                {demoAccount.name} has{" "}
+                <Money cents={demoAccount.availableBalanceCents} className="font-semibold text-ink" />{" "}
+                available ({formatDollars(demoAccount.availableBalanceCents)}). Plans deduct bills,
+                essentials, goals, giving, and your buffer from this — see Home for the full
+                breakdown.
+              </p>
+            </Card>
+          ) : null}
+
+          {/* the rest of More */}
+          <MoreSections />
+
+          <p className="text-caption text-ink-faint">
+            Prototype only — not a financial service. No bank connections, no real money, no credit
+            pulls. Data lives on this device.
+          </p>
+        </div>
+      ) : (
+        <TransactionsView
+          household={household}
+          selectedAccountId={view.accountId}
+          onSelectAccount={(accountId) => setView({ kind: "transactions", accountId })}
+          onBack={() => setView({ kind: "accounts" })}
+          onAddTransaction={() => openAddTxn(view.accountId === ALL_ACCOUNTS ? null : view.accountId)}
+        />
+      )}
+
+      {/* sheets */}
+      <AddAccountSheet
+        key={`aa${sheetNonce}`}
+        open={addAccountOpen}
+        household={household}
+        onClose={() => setAddAccountOpen(false)}
+      />
+      <AddTransactionSheet
+        key={`at${sheetNonce}`}
+        open={addTxnTarget !== null}
+        household={household}
+        defaultAccountId={addTxnTarget}
+        onClose={() => setAddTxnTarget(null)}
+      />
+      <ImportSheet open={importOpen} household={household} onClose={() => setImportOpen(false)} />
+      <ExportSheet open={exportOpen} household={household} onClose={() => setExportOpen(false)} />
+    </div>
   );
 }

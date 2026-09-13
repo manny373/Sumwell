@@ -22,7 +22,9 @@ import type {
   Goal,
   Obligation,
   Paycheck,
+  Transaction,
 } from "~/lib/finance/types";
+import type { ImportDraft } from "~/lib/accounts/import";
 import { createDemoSnapshot } from "~/lib/finance/seed";
 import type {
   Household,
@@ -147,6 +149,7 @@ export function manualHouseholdFor(
     availableCreditCents: null,
     creditLimitCents: null,
     externalId: null,
+    institution: null,
     openedAt: null,
     updatedAt: now,
   };
@@ -244,6 +247,217 @@ export function debtExtraBudgetFor(household: Household): number {
     household.assumptions.debtExtraBudgetCents ??
     (household.source === "demo" ? 25000 : 0)
   );
+}
+
+/* ------------------------------------------------- phase 3c mutations --- */
+
+/** Deterministic next id for a prefix with a numeric suffix ("imp-3"). */
+export function nextIdWithPrefix(prefix: string, existingIds: readonly string[]): string {
+  let max = 0;
+  for (const id of existingIds) {
+    if (!id.startsWith(prefix)) continue;
+    const suffix = Number(id.slice(prefix.length));
+    if (Number.isSafeInteger(suffix) && suffix > max) max = suffix;
+  }
+  return `${prefix}${max + 1}`;
+}
+
+/** Add an account record (manual entry — no connection implied). */
+export function withAddedAccount(household: Household, account: Account): Household {
+  return { ...household, accounts: [...household.accounts, account] };
+}
+
+/**
+ * Delete an account and everything pointing at it: its transactions are
+ * removed too, and obligations/paychecks referencing it keep their record but
+ * lose the account link (set to null) so no dangling refs survive.
+ */
+export function withDeletedAccount(
+  household: Household,
+  accountId: string,
+): Household {
+  return {
+    ...household,
+    accounts: household.accounts.filter((a) => a.id !== accountId),
+    transactions: household.transactions.filter((t) => t.accountId !== accountId),
+    obligations: household.obligations.map((o) =>
+      o.accountId === accountId ? { ...o, accountId: null } : o,
+    ),
+    paychecks: household.paychecks.map((p) =>
+      p.accountId === accountId ? { ...p, accountId: null } : p,
+    ),
+  };
+}
+
+/** Prepend a single transaction (manual entry). */
+export function withAddedTransaction(
+  household: Household,
+  transaction: Transaction,
+): Household {
+  return { ...household, transactions: [transaction, ...household.transactions] };
+}
+
+/**
+ * Import validated drafts in one batch. Every row gets source "imported"
+ * (never "connected"), a unique id, and an explicit statement that nothing
+ * here implies a bank connection.
+ */
+export function withImportedTransactions(
+  household: Household,
+  drafts: readonly ImportDraft[],
+  accountId: string,
+): Household {
+  const account = household.accounts.find((a) => a.id === accountId);
+  if (!account || drafts.length === 0) return household;
+  const baseId = nextIdWithPrefix("imp-", household.transactions.map((t) => t.id));
+  const startNum = Number(baseId.slice("imp-".length));
+  const imported: Transaction[] = drafts.map((d, i) => {
+    const id = `imp-${startNum + i}`;
+    return {
+      id,
+      accountId,
+      merchant: d.merchant,
+      description: d.description,
+      amountCents: d.amountCents,
+      kind: d.kind,
+      status: d.status,
+      category: d.category,
+      transactedAt: d.dateISO,
+      postedAt: d.status === "posted" ? d.dateISO : null,
+      splits: [],
+      isExcluded: false,
+      principalCents: null,
+      interestCents: null,
+      source: "imported",
+    };
+  });
+  return { ...household, transactions: [...imported, ...household.transactions] };
+}
+
+/** Inline category correction — applied to the one transaction the user sees. */
+export function withTransactionCategory(
+  household: Household,
+  txnId: string,
+  category: string,
+): Household {
+  const cleaned = category.trim();
+  if (!cleaned) return household;
+  return {
+    ...household,
+    transactions: household.transactions.map((t) =>
+      t.id === txnId ? { ...t, category: cleaned } : t,
+    ),
+  };
+}
+
+/** Exclusions toggle — excluded rows leave every spending/income total. */
+export function withTransactionExcluded(
+  household: Household,
+  txnId: string,
+  excluded: boolean,
+): Household {
+  return {
+    ...household,
+    transactions: household.transactions.map((t) =>
+      t.id === txnId ? { ...t, isExcluded: excluded } : t,
+    ),
+  };
+}
+
+/**
+ * Mark a transaction as a duplicate of another (or clear the mark).
+ * Marking also excludes it from totals; clearing restores it.
+ */
+export function withTransactionDuplicate(
+  household: Household,
+  txnId: string,
+  ofTxnId: string | null,
+): Household {
+  return {
+    ...household,
+    transactions: household.transactions.map((t) =>
+      t.id === txnId
+        ? { ...t, duplicateOf: ofTxnId, isExcluded: ofTxnId !== null }
+        : t,
+    ),
+  };
+}
+
+/** User reviewed a possible-duplicate flag and chose to KEEP the row. */
+export function withDuplicateIgnored(
+  household: Household,
+  txnId: string,
+  ignored: boolean,
+): Household {
+  return {
+    ...household,
+    transactions: household.transactions.map((t) =>
+      t.id === txnId
+        ? { ...t, duplicateIgnored: ignored, duplicateOf: ignored ? null : t.duplicateOf }
+        : t,
+    ),
+  };
+}
+
+/** Reconcile pending → posted (prototype reconciliation, no bank involved). */
+export function withTransactionPosted(
+  household: Household,
+  txnId: string,
+): Household {
+  return {
+    ...household,
+    transactions: household.transactions.map((t) =>
+      t.id === txnId && t.status === "pending"
+        ? { ...t, status: "posted", postedAt: t.transactedAt }
+        : t,
+    ),
+  };
+}
+
+/**
+ * Re-label a user-entered expense as a transfer so it is never counted as
+ * spending. Demo rows are left alone — their labels are part of the demo.
+ */
+export function withTransactionTransfer(
+  household: Household,
+  txnId: string,
+): Household {
+  return {
+    ...household,
+    transactions: household.transactions.map((t) =>
+      t.id === txnId && t.source !== "demo" && t.kind === "expense"
+        ? { ...t, kind: "transfer", category: t.category === "uncategorized" ? "transfers" : t.category }
+        : t,
+    ),
+  };
+}
+
+/**
+ * Change an account's connection status. In the prototype this is a
+ * SIMULATION ONLY — it never touches a real institution. Used for the demo
+ * "Reconnect" affordance and for exploring every honest state. Records
+ * entered as demo or manual data always keep their honest label — a
+ * simulated status can never be faked onto them.
+ */
+export function withAccountConnectionStatus(
+  household: Household,
+  accountId: string,
+  status: Account["connectionStatus"],
+): Household {
+  const account = household.accounts.find((a) => a.id === accountId);
+  if (!account) return household;
+  if (account.connectionStatus === "demo" || account.connectionStatus === "manual") {
+    return household; // can't fake a real state onto demo/manual records
+  }
+  if (status === "demo" || status === "manual") return household;
+  return {
+    ...household,
+    accounts: household.accounts.map((a) =>
+      a.id === accountId
+        ? { ...a, connectionStatus: status, updatedAt: new Date().toISOString() }
+        : a,
+    ),
+  };
 }
 
 /** Replace the giving plan (mode, amount/percent, enabled). */

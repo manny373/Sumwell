@@ -257,3 +257,110 @@ export function LockIcon(props: IconProps) {
     </Base>
   );
 }
+
+export function CardIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="3" y="5.5" width="18" height="13" rx="2.5" />
+      <path d="M3 9.8h18" />
+      <path d="M6.5 14.5h4" />
+    </Base>
+  );
+}
+
+export function BankIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 9 12 4.5 20 9" />
+      <path d="M5.5 9.5v6.5M9.5 9.5v6.5M14.5 9.5v6.5M18.5 9.5v6.5" />
+      <path d="M4 18.5h16" />
+    </Base>
+  );
+}
+
+export function LoanIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <rect x="5" y="3.5" width="14" height="17" rx="2.5" />
+      <path d="M9 8h6M9 11.5h6M9 15h3.5" />
+    </Base>
+  );
+}
+
+export function GradIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M3 9.5 12 5l9 4.5-9 4.5z" />
+      <path d="M7.5 11.8v4c0 1.1 2 2.2 4.5 2.2s4.5-1.1 4.5-2.2v-4" />
+      <path d="M21 9.5V15" />
+    </Base>
+  );
+}
+
+export function TrendsIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4 17.5 9.5 12l3.5 3.5L20 7.5" />
+      <path d="M15 7.5h5v5" />
+    </Base>
+  );
+}
+
+export function BoxIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 3.5 20 7.5v9L12 20.5 4 16.5v-9z" />
+      <path d="M4 7.5l8 4 8-4M12 11.5v9" />
+    </Base>
+  );
+}
+
+export function UploadIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 15V5" />
+      <path d="M7.5 9.5 12 5l4.5 4.5" />
+      <path d="M4.5 19.5h15" />
+    </Base>
+  );
+}
+
+export function RefreshIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4.5 12a7.5 7.5 0 0 1 13-5.2L20 9" />
+      <path d="M20 4.5V9h-4.5" />
+      <path d="M19.5 12a7.5 7.5 0 0 1-13 5.2L4 15" />
+      <path d="M4 19.5V15h4.5" />
+    </Base>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4.5 6.5h15" />
+      <path d="M9 6.5V4.8A1.3 1.3 0 0 1 10.3 3.5h3.4A1.3 1.3 0 0 1 15 4.8v1.7" />
+      <path d="M6.5 6.5 7.5 20a1.5 1.5 0 0 0 1.5 1.4h6A1.5 1.5 0 0 0 16.5 20l1-13.5" />
+      <path d="M10 10.5v6M14 10.5v6" />
+    </Base>
+  );
+}
+
+export function PencilIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M14.5 5.5 18.5 9.5 8 20H4v-4z" />
+      <path d="M12.5 7.5l4 4" />
+    </Base>
+  );
+}
+
+export function ArrowLeftIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M19 12H5.5" />
+      <path d="M11 6.5 5.5 12l5.5 5.5" />
+    </Base>
+  );
+}
