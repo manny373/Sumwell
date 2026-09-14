@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Banner } from "~/components/Banner";
-import { Button } from "~/components/Button";
+import { Button, buttonClass } from "~/components/Button";
 import { Card } from "~/components/Card";
 import { LoadingState } from "~/components/LoadingState";
 import { Money } from "~/components/Money";
@@ -24,14 +24,6 @@ import type { Household } from "~/lib/client/types";
 export const Route = createFileRoute("/_app/progress")({
   component: ProgressRoute,
 });
-
-function SourceChip({ label }: { label: string }) {
-  return (
-    <span className="rounded-pill border border-warning/40 bg-warning-soft px-2.5 py-1 text-caption font-semibold text-warning">
-      {label}
-    </span>
-  );
-}
 
 function EstimateChip() {
   return (
@@ -395,23 +387,13 @@ function ProgressRoute() {
     <div className="flex flex-col gap-6 pb-6">
       <header>
         <div className="flex items-center justify-between gap-3">
-          <SourceChip
-            label={
-              household.source === "demo"
-                ? "Synthetic demo data"
-                : "Your numbers · saved on this device"
-            }
-          />
-          <Link
-            to="/setup"
-            className="rounded-pill border border-line-strong bg-surface-raised px-3 py-1.5 text-caption font-medium text-ink-muted transition-colors hover:border-brand-600 hover:text-brand-700 dark:hover:text-brand-500"
-          >
-            Edit assumptions
+          <div className="flex items-center gap-2.5">
+            <ProgressIcon className="h-6 w-6 text-brand-700 dark:text-brand-900" />
+            <h1 className="text-h1 text-ink">Progress</h1>
+          </div>
+          <Link to="/setup" className={buttonClass("secondary", "sm")}>
+            Edit plan
           </Link>
-        </div>
-        <div className="mt-2 flex items-center gap-2.5">
-          <ProgressIcon className="h-6 w-6 text-brand-700 dark:text-brand-900" />
-          <h1 className="text-h1 text-ink">Progress</h1>
         </div>
         <p className="mt-1 text-body-sm text-ink-muted">
           What has actually changed — with dates and evidence. Everything that
