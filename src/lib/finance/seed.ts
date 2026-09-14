@@ -197,6 +197,26 @@ const accounts: Account[] = [
     openedAt: "2023-02-15",
     updatedAt: "2026-09-10T08:30:00Z",
   },
+  // Medical bill — tracked as a debt AND as an account record so it appears
+  // in Accounts and the All-your-money overview. Every debt must be
+  // inspectable: the account record is its inspection point (Finding 10).
+  {
+    id: "acc-medical",
+    name: "Medical Bill — Demo Clinic",
+    type: "loan",
+    connectionStatus: "demo",
+    source: DEMO,
+    owner: DEMO_HOUSEHOLD,
+    currency: "USD",
+    currentBalanceCents: -124000,
+    availableBalanceCents: null,
+    availableCreditCents: null,
+    creditLimitCents: null,
+    externalId: null,
+    institution: "Demo Clinic Billing",
+    openedAt: "2026-04-02",
+    updatedAt: "2026-09-10T08:30:00Z",
+  },
 ];
 
 const paychecks: Paycheck[] = [
@@ -393,6 +413,9 @@ const debts: Debt[] = [
     name: "Medical Bill — Demo Clinic",
     category: "medical",
     balanceCents: 124000,
+    // The debt's inspection point: the account record it maps to. Keeps the
+    // Medical Bill in Accounts and the All-your-money overview (Finding 10).
+    accountId: "acc-medical",
     // APR unknown: never invent interest for this debt.
     aprBps: null,
     aprKind: "unknown",
