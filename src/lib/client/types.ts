@@ -47,8 +47,20 @@ export interface PlanAssumptions {
    * Monthly extra-payment budget for debt, in cents. Optional so households
    * persisted before Phase 3b (without the field) still load; helpers fall
    * back to a per-source default (demo $250/mo, manual $0).
+   *
+   * This is the WHAT-IF scenario input: it feeds the Plan debt-strategy
+   * projections only and is NEVER deducted from a paycheck plan unless it is
+   * adopted into `adoptedDebtExtraCents`.
    */
   debtExtraBudgetCents?: number;
+  /**
+   * Monthly extra debt payment the user ADOPTED ("Apply to my plan"). Unlike
+   * the what-if budget, this flows into buildHomePlan / forecastCashFlow each
+   * period (converted per check via the household's pay cadence) and an
+   * unaffordable adoption produces a visible shortfall. Optional so older
+   * persisted households without the field still load (defaults to 0).
+   */
+  adoptedDebtExtraCents?: number;
 }
 
 export type HouseholdSource = "demo" | "manual";

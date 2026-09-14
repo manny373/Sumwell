@@ -41,13 +41,19 @@ export const MANUAL_HOUSEHOLD_LABEL = "Your household";
  * the UI as demo assumptions, editable from Home via the "edit" path.
  *
  *   essentials: $250/cycle · buffer: $300/cycle · emergency fund: $200/cycle
- *   giving: $60/cycle (per-check share of the $120/month demo giving plan on
- *   biweekly pay — see givingForCycle in ./plan.ts)
- *   debt extra budget: $250/month (a demo choice — editable on the Plan tab)
+ *   giving: $60/cycle — per-check share of the $120/MONTH demo giving plan on
+ *   the demo's twice-monthly pay (10th & 25th): giving/perCheckShare yields
+ *   12000 × 12 ÷ 24 = $60/check exactly. Never a hard-coded divide-by-two.
+ *   debt extra budget: $250/month WHAT-IF (a demo choice, editable on the
+ *   Plan tab) — NOT adopted: adoptedDebtExtraCents starts at 0, so the what-if
+ *   never leaks into the Home plan until the user clicks "Apply to my plan".
  *
  * Hand-checked against the engine: with the seeded checking available balance
- * of $1,799.94 and the bills due between the Sep 10 and Sep 25 paychecks
- * ($358.70), remaining = 1799.94 − 358.70 − 250 − 200 − 60 − 300 = $631.24.
+ * of $1,799.94, the bills due between the Sep 10 and Sep 25 paychecks
+ * ($358.70), the debt minimums due inside that window (card 9/22 $96.00 +
+ * federal 9/25 $145.00 + medical 9/15 $50.00 = $291.00; auto min was paid on
+ * the 9/5 record and private min is due 9/28, after the window),
+ * remaining = 1799.94 − 358.70 − 291.00 − 250 − 200 − 60 − 300 = $340.24.
  */
 export const DEMO_PLAN_ASSUMPTIONS: PlanAssumptions = {
   essentialsPerCycleCents: 25000,
@@ -60,6 +66,7 @@ export const DEMO_PLAN_ASSUMPTIONS: PlanAssumptions = {
     },
   ],
   debtExtraBudgetCents: 25000,
+  adoptedDebtExtraCents: 0,
 };
 
 /** Copy the frozen demo snapshot into a mutable Household wrapper. */
@@ -86,6 +93,7 @@ export function demoHousehold(createdAt?: string): Household {
         ...g,
       })),
       debtExtraBudgetCents: DEMO_PLAN_ASSUMPTIONS.debtExtraBudgetCents,
+      adoptedDebtExtraCents: DEMO_PLAN_ASSUMPTIONS.adoptedDebtExtraCents,
     },
   };
 }
@@ -96,9 +104,15 @@ function manualGivingPlan(inputs: ManualOnboardingInputs) {
     id: "giv-manual",
     basis: "net" as const,
     categories: ["custom"] as GivingCategory[],
-    schedule: "perPaycheck" as const,
+    // The onboarding form enters "amount per check". With a single modeled
+    // paycheck there is no pay cadence on record to convert against, so the
+    // plan's own cadence is declared as the assumption: per-check giving is
+    // stored at frequency "biweekly" and the per-check allocation is the full
+    // amount (never divided). Declared assumption, not a silent guess.
+    frequency: "biweekly" as const,
     source: "manual" as const,
-    notes: "Optional giving — chosen by the user during onboarding.",
+    notes:
+      "Optional giving — chosen by the user during onboarding. 'Per check' is modeled at the plan's own cadence (assumed every 2 weeks) because no pay schedule is on record.",
   };
   if (inputs.giving.choice === "fixed" && inputs.giving.fixedCents !== null) {
     return {
@@ -223,6 +237,7 @@ export function manualHouseholdFor(
           ]
         : [],
       debtExtraBudgetCents: 0,
+      adoptedDebtExtraCents: 0,
     },
   };
 }
@@ -247,6 +262,14 @@ export function debtExtraBudgetFor(household: Household): number {
     household.assumptions.debtExtraBudgetCents ??
     (household.source === "demo" ? 25000 : 0)
   );
+}
+
+/**
+ * Read the ADOPTED extra debt payment (per month). 0 = nothing adopted; a
+ * what-if scenario budget is never adopted implicitly.
+ */
+export function adoptedDebtExtraFor(household: Household): number {
+  return household.assumptions.adoptedDebtExtraCents ?? 0;
 }
 
 /* ------------------------------------------------- phase 3c mutations --- */
@@ -534,5 +557,22 @@ export function withDebtExtraBudget(
   return {
     ...household,
     assumptions: { ...household.assumptions, debtExtraBudgetCents: cents },
+  };
+}
+
+/**
+ * Adopt a monthly extra debt payment ("Apply to my plan"). Unlike the what-if
+ * budget, this value flows into buildHomePlan/forecastCashFlow each period
+ * (converted per check via the household's pay cadence). An unaffordable
+ * adopted amount produces a visible shortfall — never hidden.
+ */
+export function withAdoptedDebtExtra(
+  household: Household,
+  cents: number,
+): Household {
+  if (!Number.isSafeInteger(cents) || cents < 0) return household;
+  return {
+    ...household,
+    assumptions: { ...household.assumptions, adoptedDebtExtraCents: cents },
   };
 }

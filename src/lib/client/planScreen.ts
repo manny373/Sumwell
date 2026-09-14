@@ -1,16 +1,26 @@
 /**
- * Plan screen view builders — Phase 3b.
+ * Plan screen view builders — Phase 3b + Phase 4a fixes.
  *
  * Pure, deterministic functions that turn a Household into everything the Plan
  * tab renders: the cycle's bills (exactly-once semantics), the debt strategy
- * comparison, savings goals with confirmed-vs-projected progress, the optional
- * giving plan with factual impact, and simulated automation rules with
- * explicit previews. Nothing here moves money, invents amounts, or implies a
+ * WHAT-IF comparison clearly separated from the ADOPTED extra payment, the
+ * debt-minimum audit for this cycle, savings goals with confirmed-vs-projected
+ * progress, the optional giving plan with same-period factual impact and one
+ * label source, and simulated automation rules whose previews resolve their
+ * trigger dates through the SPECIFIC linked obligation/debt (never a
+ * substitute bill). Nothing here moves money, invents amounts, or implies a
  * transfer happened.
  */
 import { debtComparison } from "~/lib/finance/debt";
 import { goalProgress } from "~/lib/finance/goals";
-import { givingImpact } from "~/lib/finance/giving";
+import {
+  givingForPeriod,
+  givingImpact,
+  givingLabel,
+  perMonthToPerCheck,
+  frequencyWord,
+  type GivingFrequency,
+} from "~/lib/finance/giving";
 import {
   forecastCashFlow,
   type CashFlowDay,
@@ -29,16 +39,24 @@ import type {
 import type { Household } from "./types";
 import {
   cycleObligations,
+  cycleDebtMinimums,
+  debtMinimumAudit,
+  eligibleAvailableCents,
   givingForCycle,
   lastReceivedPaycheck,
-  nextObligationDueOnOrAfter,
+  payFrequencyFor,
   nextPaycheck,
 } from "./plan";
-import { householdGoalContributions, debtExtraBudgetFor } from "./household";
+import {
+  householdGoalContributions,
+  debtExtraBudgetFor,
+  adoptedDebtExtraFor,
+} from "./household";
 import {
   addDays,
   daysBetween,
   formatMonthDay,
+  formatWeekdayMonthDay,
   nextMonthlyOccurrence,
 } from "./dates";
 
@@ -75,17 +93,66 @@ export function cycleObligationsView(household: Household): CycleObligationsView
   };
 }
 
+/* --------------------------------------- 1b. cycle debt minimum audit --- */
+
+export interface CycleDebtMinimumsView {
+  /** The full audit (each debt exactly one bucket). */
+  audit: ReturnType<typeof debtMinimumAudit>;
+  /** Minimums deducted by THIS cycle's plan, in cents. */
+  inWindowCents: number;
+  paidOnRecordCount: number;
+  afterWindowCount: number;
+  noDueDateCount: number;
+}
+
+/** The Plan section's "minimum payments this cycle" view — built from the audit. */
+export function cycleDebtMinimumsView(household: Household): CycleDebtMinimumsView {
+  const audit = debtMinimumAudit(household);
+  return {
+    audit,
+    inWindowCents: audit
+      .filter((r) => r.status === "inWindow")
+      .reduce((s, r) => s + r.debt.minPaymentCents, 0),
+    paidOnRecordCount: audit.filter((r) => r.status === "paidOnRecord").length,
+    afterWindowCount: audit.filter((r) => r.status === "afterWindow").length,
+    noDueDateCount: audit.filter((r) => r.status === "noDueDate").length,
+  };
+}
+
 /* ------------------------------------------------------ 2. debt plans --- */
 
+export interface FundingGapInfo {
+  /** Extra per-check (what-if monthly ÷ pay cadence). */
+  extraPerCheckCents: number;
+  /** In-window minimums for this cycle. */
+  minimumsPerCycleCents: number;
+  /** What's left this cycle after bills, essentials, buffer, goals, giving. */
+  availableForDebtCents: number;
+  /** Positive when the what-if scenario would outrun available funds. */
+  gapCents: number;
+  /** Null when the pay cadence isn't on record (gap can't be computed). */
+  computed: boolean;
+}
+
 export interface DebtStrategyView {
-  /** The two side-by-side strategies from the engine. */
+  /** The two side-by-side strategies from the engine (WHAT-IF, not adopted). */
   comparison: ReturnType<typeof debtComparison>;
-  /** The editable extra-payment budget (monthly). */
+  /** The editable what-if extra budget (monthly) — never adopted implicitly. */
   extraBudgetCents: number;
   /** Sum of all statement minimums (monthly). */
   minimumsCents: number;
-  /** minimums + extra — what the household commits monthly. */
+  /** minimums + what-if extra — the MONTHLY what-if cash number. */
   monthlyTotalCents: number;
+  /** The ADOPTED extra payment (monthly) — flows into Home each period. */
+  adoptedExtraCents: number;
+  /** Per-check adopted amount for the current cycle (0 when none). */
+  adoptedPerCheckCents: number;
+  /** What-if funding gap vs this cycle's available-after-plan money. */
+  gap: FundingGapInfo;
+  /** True when the what-if extra equals the adopted amount. */
+  whatIfMatchesAdopted: boolean;
+  /** True when the pay cadence isn't on record (adoption/../math limited). */
+  payCadenceKnown: boolean;
 }
 
 export function debtStrategyView(
@@ -93,13 +160,83 @@ export function debtStrategyView(
   nowISO: string,
 ): DebtStrategyView {
   const extraBudgetCents = debtExtraBudgetFor(household);
+  const adoptedExtraCents = adoptedDebtExtraFor(household);
   const comparison = debtComparison(household.debts, extraBudgetCents, nowISO);
   const minimumsCents = household.debts.reduce((s, d) => s + d.minPaymentCents, 0);
+  const payFrequency = payFrequencyFor(household);
+  const payCadenceKnown = payFrequency !== null;
+
+  // Per-cycle funding: what's left after the plan's fixed commitments,
+  // before any debt minimums or extra payments.
+  const next = nextPaycheck(household);
+  const availableCents = next ? eligibleAvailableCents(household, next) : null;
+  const billTotal = cycleObligations(household).reduce(
+    (s, o) => s + (o.alreadyReflected ? 0 : o.amountCents),
+    0,
+  );
+  const givingCents =
+    next === null
+      ? 0
+      : (givingForCycle(
+          household.givingPlan,
+          payFrequency,
+          next.netCents,
+          next.grossCents,
+        ) ?? 0);
+  const goalsCents = household.assumptions.goalContributions.reduce(
+    (s, g) => s + g.amountCents,
+    0,
+  );
+  const availableForDebtCents =
+    availableCents === null
+      ? 0
+      : availableCents -
+        billTotal -
+        household.assumptions.essentialsPerCycleCents -
+        household.assumptions.bufferCents -
+        goalsCents -
+        givingCents;
+
+  const minimumsPerCycleCents = cycleDebtMinimums(household).reduce(
+    (s, d) => s + d.amountCents,
+    0,
+  );
+  let gap: FundingGapInfo;
+  if (payFrequency === null) {
+    gap = {
+      extraPerCheckCents: 0,
+      minimumsPerCycleCents,
+      availableForDebtCents,
+      gapCents: 0,
+      computed: false,
+    };
+  } else {
+    const extraPerCheckCents = perMonthToPerCheck(extraBudgetCents, payFrequency);
+    gap = {
+      extraPerCheckCents,
+      minimumsPerCycleCents,
+      availableForDebtCents,
+      gapCents: Math.max(
+        0,
+        extraPerCheckCents + minimumsPerCycleCents - availableForDebtCents,
+      ),
+      computed: true,
+    };
+  }
+
+  const adoptedPerCheckCents =
+    payFrequency === null ? 0 : perMonthToPerCheck(adoptedExtraCents, payFrequency);
+
   return {
     comparison,
     extraBudgetCents,
     minimumsCents,
     monthlyTotalCents: minimumsCents + extraBudgetCents,
+    adoptedExtraCents,
+    adoptedPerCheckCents,
+    gap,
+    whatIfMatchesAdopted: extraBudgetCents === adoptedExtraCents,
+    payCadenceKnown,
   };
 }
 
@@ -169,81 +306,96 @@ export function goalViews(household: Household): GoalView[] {
 
 /* ------------------------------------------------------- 4. giving ------ */
 
-/** Pay periods per month — demo is biweekly (2), manual single-check (1). */
-function cyclesPerMonth(household: Household): number {
-  const received = lastReceivedPaycheck(household);
-  const next = nextPaycheck(household);
-  if (received && next) {
-    const gap = daysBetween(received.date, next.date);
-    if (gap >= 7 && gap <= 31) return Math.max(1, Math.round(30.44 / gap));
-  }
-  return 1;
-}
-
 export interface GivingView {
   plan: GivingPlan;
-  scheduleLabel: string;
-  /** The amount the Home plan actually deducts this period; null = skipped. */
+  /** The per-check amount the Home plan deducts; null = skipped/unresolved. */
   cycleGivingCents: number | null;
-  /** Gift computed at the plan's own schedule (e.g. monthly), with impact. */
+  /** True when the plan is off or yields no gift this period. */
+  skipped: boolean;
+  /** When the plan is on but can't resolve a per-check amount, explain why. */
+  resolutionNote: string | null;
+  /** Same-period impact (per-check context — all amounts are this check's). */
   impact: ReturnType<typeof givingImpact> | null;
-  /** Plain-language summary, e.g. "Fixed — $120.00/month". */
-  amountNote: string;
-  /** "net pay" or "gross pay" — the basis a percent gift applies to. */
-  basisLabel: string;
-  /** Monthly bill total behind the impact share. */
-  billsMonthlyCents: number;
-  /** Monthly goal allocations behind the impact share (a labeled estimate). */
-  goalsMonthlyCents: number;
+  /** Single label source shared with Setup/Home/editor (Finding 1). */
+  label: ReturnType<typeof givingLabel>;
+  /** "This pay period" (the row label for the per-check amount). */
+  periodRowLabel: string;
+  /** Per-check bills behind the impact share. */
+  billsCycleCents: number;
+  /** Per-check goal allocations behind the impact share. */
+  goalsCycleCents: number;
 }
 
 export function givingView(household: Household): GivingView {
   const plan = household.givingPlan;
   const paycheck = nextPaycheck(household);
-  const scheduleLabel =
-    plan.schedule === "perPaycheck"
-      ? "per paycheck"
-      : plan.schedule === "monthly"
-        ? "monthly"
-        : "annual";
+  const payFrequency = payFrequencyFor(household);
 
+  const resolution =
+    paycheck === null
+      ? null
+      : givingForPeriod(
+          plan,
+          { netCents: paycheck.netCents, grossCents: paycheck.grossCents },
+          payFrequency,
+        );
   const cycleGivingCents =
-    paycheck === null ? null : givingForCycle(plan, paycheck.netCents);
+    resolution === null || resolution.skipped || resolution.givingCents === null
+      ? null
+      : resolution.givingCents;
 
-  const billsMonthlyCents = household.obligations.reduce(
+  const billsCycleCents = cycleObligations(household).reduce(
     (s, o) => s + o.amountCents,
     0,
   );
-  const goalsMonthlyCents =
-    household.assumptions.goalContributions.reduce(
-      (s, g) => s + g.amountCents,
-      0,
-    ) * cyclesPerMonth(household);
+  const goalsCycleCents = household.assumptions.goalContributions.reduce(
+    (s, g) => s + g.amountCents,
+    0,
+  );
 
+  // Same-period percentage: the per-check gift over the per-check basis and
+  // the per-check bills+goals — numerator and denominator always cover the
+  // SAME named period (a check), so 5.57%-vs-2.79% drift is impossible.
   const impact =
-    paycheck === null
+    paycheck === null || cycleGivingCents === null
       ? null
-      : givingImpact(
-          plan,
-          { grossCents: paycheck.grossCents, netCents: paycheck.netCents },
-          { billsCents: billsMonthlyCents, goalsCents: goalsMonthlyCents },
-        );
+      : givingImpact({
+          givingCents: cycleGivingCents,
+          basisCents:
+            plan.basis === "gross" ? paycheck.grossCents : paycheck.netCents,
+          billsCents: billsCycleCents,
+          goalsCents: goalsCycleCents,
+          period: "check",
+        });
 
-  const basisLabel = plan.basis === "gross" ? "gross pay" : "net pay";
-  const amountNote =
-    plan.mode === "percent"
-      ? `${plan.percentBps === null ? 0 : plan.percentBps / 100}% of ${basisLabel}`
-      : `Fixed — ${plan.amountCents === null ? formatCents(0) : formatCents(plan.amountCents)}`;
+  const label =
+    paycheck === null
+      ? givingLabel(plan, {
+          payFrequency,
+          netCents: 0,
+          grossCents: 0,
+          givingCents: null,
+        })
+      : givingLabel(plan, {
+          payFrequency,
+          netCents: paycheck.netCents,
+          grossCents: paycheck.grossCents,
+          givingCents: cycleGivingCents,
+        });
 
   return {
     plan,
-    scheduleLabel,
     cycleGivingCents,
+    skipped: resolution === null || resolution.skipped || resolution.givingCents === null,
+    resolutionNote:
+      resolution !== null && !resolution.skipped && resolution.givingCents === null
+        ? resolution.note
+        : null,
     impact,
-    amountNote,
-    basisLabel,
-    billsMonthlyCents,
-    goalsMonthlyCents,
+    label,
+    periodRowLabel: "This pay period",
+    billsCycleCents,
+    goalsCycleCents,
   };
 }
 
@@ -263,6 +415,11 @@ export interface AutomationRuleView {
   scheduleLabel: string;
   /** Modeled trigger date; null when the schedule can't be anchored. */
   triggerDate: string | null;
+  /**
+   * Trigger explanation derived from the SAME scheduling result as the date —
+   * a paycheck-relative rule always says which paycheck offset, and a
+   * due-date rule always names the linked debt's own due date.
+   */
   triggerLabel: string;
   /** Source funds available today (the "from what balance" line). */
   sourceAvailableCents: number | null;
@@ -284,6 +441,14 @@ const SCHEDULE_LABELS: Record<AutomationRule["schedule"], string> = {
   weekly: "weekly",
   monthly: "monthly",
 };
+
+/** "the day after the next paycheck" spelled from the offset — one source. */
+function paycheckOffsetLabel(offsetDays: number, targetDate: string): string {
+  const dateLabel = formatWeekdayMonthDay(targetDate);
+  if (offsetDays === 0) return `on the next paycheck (${dateLabel})`;
+  if (offsetDays === 1) return `the day after the next paycheck (${dateLabel})`;
+  return `${offsetDays} days after the next paycheck (${dateLabel})`;
+}
 
 /** Resolve what a rule would move at its next trigger, in cents. */
 function ruleAmountCents(
@@ -334,33 +499,62 @@ function ruleAmountCents(
   };
 }
 
-/** When a perPaycheck / onDueDate rule would next fire, as a modeled date. */
-function ruleTriggerDate(
+/**
+ * When a perPaycheck / onDueDate rule would next fire, as a modeled date AND
+ * its explanation — both from the same scheduling result. Due-date rules
+ * resolve through the LINKED DEBT's own statement due day (never the next
+ * random bill); if that due date isn't on record the preview says "due date
+ * unknown" instead of substituting another obligation.
+ */
+function ruleTrigger(
   rule: AutomationRule,
   household: Household,
   nowISO: string,
-): { date: string; label: string } | null {
-  const next = nextPaycheck(household);
+): { date: string | null; label: string } {
   if (rule.schedule === "perPaycheck") {
-    if (!next) return null;
+    const next = nextPaycheck(household);
+    if (!next) {
+      return { date: null, label: "No upcoming paycheck on record to anchor this preview." };
+    }
     const date = addDays(next.date, rule.offsetDays);
-    return { date, label: "the day after the next paycheck" };
+    return { date, label: paycheckOffsetLabel(rule.offsetDays, date) };
   }
   if (rule.schedule === "onDueDate") {
-    // Milestone A has no card/statement due dates in the model, so "on due
-    // date" is modeled honestly as the NEXT bill due from today — the rule
-    // previews against the upcoming due date it can actually see.
-    const due = nextObligationDueOnOrAfter(household.obligations, nowISO);
-    if (!due) return null;
-    const date = addDays(due.dueDate, rule.offsetDays);
+    const debt = rule.linkedDebtId
+      ? household.debts.find((d) => d.id === rule.linkedDebtId)
+      : null;
+    if (!debt) {
+      return {
+        date: null,
+        label: "Due date unknown — this rule isn't linked to a debt or obligation.",
+      };
+    }
+    if (debt.minPaymentDueDay === null) {
+      return {
+        date: null,
+        label: `Due date unknown — no statement due date is on record for ${debt.name}.`,
+      };
+    }
+    // The specific debt's next occurrence, strictly after today.
+    const due = nextMonthlyOccurrence(debt.minPaymentDueDay, addDays(nowISO, -1));
+    const date = addDays(due, rule.offsetDays);
+    const offsetNote =
+      rule.offsetDays === 0
+        ? ""
+        : rule.offsetDays === 1
+          ? ", the day after"
+          : `, ${rule.offsetDays} days after`;
     return {
       date,
-      label: `the next bill due — ${due.obligation.name} on ${formatMonthDay(due.dueDate)}`,
+      label: `the minimum-payment due date for ${debt.name} (${formatMonthDay(due)}${offsetNote})`,
     };
   }
   // weekly/monthly aren't anchored in the Milestone A data model; model them
   // on the next pay cycle and say so (never invent a more precise date).
-  if (!next) return null;
+  const next = nextPaycheck(household);
+  if (!next) {
+    return { date: null, label: "No paycheck on record to anchor this preview." };
+  }
   const date = addDays(next.date, rule.offsetDays);
   return {
     date,
@@ -392,8 +586,8 @@ export function automationRuleViews(
     const { cents: wouldMoveCents, label: amountLabel, unresolved } =
       ruleAmountCents(rule, next, linkedDebt);
 
-    const trigger = ruleTriggerDate(rule, household, nowISO);
-    const stale = trigger !== null && trigger.date < nowISO;
+    const trigger = ruleTrigger(rule, household, nowISO);
+    const stale = trigger.date !== null && trigger.date < nowISO;
     const sourceAvailableCents = sourceAccount
       ? sourceAccount.availableBalanceCents ?? sourceAccount.currentBalanceCents
       : null;
@@ -402,7 +596,7 @@ export function automationRuleViews(
     let triggerDay: CashFlowDay | null = null;
     if (
       sourceAvailableCents !== null &&
-      trigger !== null &&
+      trigger.date !== null &&
       !stale &&
       wouldMoveCents !== null
     ) {
@@ -426,8 +620,8 @@ export function automationRuleViews(
       wouldMoveCents,
       maxCents: rule.maxCents,
       scheduleLabel: SCHEDULE_LABELS[rule.schedule],
-      triggerDate: trigger?.date ?? null,
-      triggerLabel: trigger?.label ?? "Not modeled — no paycheck to anchor to",
+      triggerDate: trigger.date,
+      triggerLabel: trigger.label,
       sourceAvailableCents,
       stale,
       forecast,
@@ -463,8 +657,9 @@ function forecastForRule(
     }));
 
   // Outflows: obligations landing in the window (alreadyReflected obligations
-  // already came out of the available balance — never double-counted) plus the
-  // rule's own simulated transfer on its trigger date.
+  // already came out of the available balance — never double-counted), debt
+  // minimums due in-window (the same audit the Home plan uses), the adopted
+  // extra payment per check, plus the rule's own simulated transfer.
   const outflows: Array<{ date: string; amountCents: number; label: string }> = [];
   for (const obligation of household.obligations) {
     if (obligation.alreadyReflected) continue;
@@ -474,6 +669,19 @@ function forecastForRule(
     if (due <= horizonEnd) {
       outflows.push({ date: due, amountCents: obligation.amountCents, label: obligation.name });
     }
+  }
+  for (const min of cycleDebtMinimums(household)) {
+    outflows.push({ date: horizonEnd, amountCents: min.amountCents, label: min.name });
+  }
+  const payFrequency = payFrequencyFor(household);
+  const adoptedPerCheck =
+    payFrequency === null ? 0 : perMonthToPerCheck(adoptedDebtExtraFor(household), payFrequency);
+  if (adoptedPerCheck > 0) {
+    outflows.push({
+      date: paycheckDate ?? horizonEnd,
+      amountCents: adoptedPerCheck,
+      label: "Adopted extra debt payment",
+    });
   }
   outflows.push({
     date: endDate,
@@ -487,3 +695,5 @@ function forecastForRule(
 function fmt(cents: number): string {
   return formatCents(cents);
 }
+
+export { frequencyWord, type GivingFrequency };

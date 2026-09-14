@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Banner } from "~/components/Banner";
 import { Button } from "~/components/Button";
 import { Card } from "~/components/Card";
 import { LoadingState } from "~/components/LoadingState";
 import { Money } from "~/components/Money";
+import { Sheet } from "~/components/Dialog";
 import { DonutChart, LineChart } from "~/components/charts";
 import { ProgressIcon } from "~/components/icons";
 import { useClientData } from "~/lib/client/store";
@@ -13,7 +14,9 @@ import { buildHomePlan } from "~/lib/client/plan";
 import {
   allConfirmedChanges,
   checkInSummary,
+  evidenceRecordFor,
   goalProgressViews,
+  type ConfirmedChange,
 } from "~/lib/client/progress";
 import { formatDollars } from "~/lib/money";
 import type { Household } from "~/lib/client/types";
@@ -50,6 +53,11 @@ function ConfirmedChip() {
 
 function ConfirmedChangesSection({ household }: { household: Household }) {
   const changes = useMemo(() => allConfirmedChanges(household), [household]);
+  const [evidenceFor, setEvidenceFor] = useState<ConfirmedChange | null>(null);
+  const evidence = useMemo(
+    () => (evidenceFor ? evidenceRecordFor(household, evidenceFor) : null),
+    [household, evidenceFor],
+  );
 
   return (
     <section aria-labelledby="progress-changes">
@@ -59,8 +67,10 @@ function ConfirmedChangesSection({ household }: { household: Household }) {
           <ConfirmedChip />
         </div>
         <p className="mt-1 text-caption text-ink-muted">
-          Dated + evidence only — every row points at a record you can see. The
-          app never takes credit for progress it did not observe.
+          Dated + evidence only — every row has a "View evidence" link that
+          opens the actual record behind it. The app never takes credit for
+          progress it did not observe and never infers a balance change from a
+          payment alone.
         </p>
         {changes.length === 0 ? (
           <div className="mt-4 rounded-control border border-dashed border-line-strong bg-surface-sunken/60 px-4 py-6 text-center">
@@ -85,6 +95,35 @@ function ConfirmedChangesSection({ household }: { household: Household }) {
                   <p className="mt-0.5 text-caption leading-relaxed text-ink-muted">
                     {c.detail}
                   </p>
+                  {c.balanceTodayCents !== null ? (
+                    <p className="mt-0.5 text-caption text-ink-muted">
+                      Balance today: <Money cents={c.balanceTodayCents} />
+                      {c.balanceTodayAccountName
+                        ? ` on ${c.balanceTodayAccountName}`
+                        : ""}{" "}
+                      — the balance is stated as it is, not as a reduction.
+                    </p>
+                  ) : (
+                    <p className="mt-0.5 text-caption text-ink-muted">
+                      No balance change is claimed — a dated balance history
+                      isn't on record yet.
+                    </p>
+                  )}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEvidenceFor(c)}
+                    >
+                      View evidence
+                    </Button>
+                    <details className="text-caption text-ink-faint">
+                      <summary className="cursor-pointer select-none">
+                        Technical details
+                      </summary>
+                      <p className="mt-1">Record id: {c.technicalId}</p>
+                    </details>
+                  </div>
                 </div>
                 <Money
                   cents={c.amountCents}
@@ -96,6 +135,60 @@ function ConfirmedChangesSection({ household }: { household: Household }) {
           </ul>
         )}
       </Card>
+
+      <Sheet
+        open={evidenceFor !== null}
+        onClose={() => setEvidenceFor(null)}
+        title={evidenceFor ? `Evidence — ${evidenceFor.title}` : "Evidence"}
+        footer={
+          <Button variant="ghost" onClick={() => setEvidenceFor(null)}>
+            Close
+          </Button>
+        }
+      >
+        {evidenceFor === null ? null : evidence === null ? (
+          <div className="rounded-control border border-warning/40 bg-warning-soft px-3 py-4">
+            <p className="text-body-sm font-semibold text-warning">
+              Record not found
+            </p>
+            <p className="mt-1 text-caption text-ink-muted">
+              The record behind this change no longer exists in this household.
+              It is shown as missing rather than invented.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div>
+              <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
+                Record type
+              </p>
+              <p className="mt-0.5 text-body-sm font-medium text-ink">
+                {evidence.recordType === "transaction"
+                  ? "Transaction"
+                  : "Goal contribution"}
+              </p>
+            </div>
+            <p className="text-body-sm text-ink">{evidence.heading}</p>
+            <dl className="flex flex-col gap-1.5 text-body-sm">
+              {evidence.rows.map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-baseline justify-between gap-6"
+                >
+                  <dt className="text-ink-muted">{row.label}</dt>
+                  <dd className="text-right text-num text-ink">{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+            <details className="text-caption text-ink-faint">
+              <summary className="cursor-pointer select-none">
+                Technical details
+              </summary>
+              <p className="mt-1">Record id: {evidence.technicalId}</p>
+            </details>
+          </div>
+        )}
+      </Sheet>
     </section>
   );
 }

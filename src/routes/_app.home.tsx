@@ -185,6 +185,20 @@ function RemainingMoneyCard({ plan, household }: { plan: HomePlan; household: Ho
           caption={`${plan.obligations.length} ${plan.obligations.length === 1 ? "bill" : "bills"} due before the next paycheck`}
           cents={result.obligationsDeductedCents}
         />
+        {result.debtMinimumsCents > 0 ? (
+          <EquationRow
+            label="Debt minimums"
+            caption={`${plan.debtMinimums.length} minimum due before the next paycheck — each counted once`}
+            cents={result.debtMinimumsCents}
+          />
+        ) : null}
+        {result.debtExtraCents > 0 ? (
+          <EquationRow
+            label="Extra debt payment"
+            caption="Adopted on the Plan tab — committed for this period"
+            cents={result.debtExtraCents}
+          />
+        ) : null}
         <EquationRow
           label="Essentials"
           caption="Estimated essential spending this cycle"
@@ -242,7 +256,8 @@ function NextObligationCard({ plan }: { plan: HomePlan }) {
         </p>
         <p className="mt-2 text-h4 text-ink">Nothing due before payday</p>
         <p className="mt-1 text-body-sm text-ink-muted">
-          No bills are scheduled between now and your next paycheck.
+          No bills or minimum payments are scheduled between now and your next
+          paycheck.
         </p>
       </Card>
     );
@@ -255,12 +270,13 @@ function NextObligationCard({ plan }: { plan: HomePlan }) {
           <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
             Next obligation
           </p>
-          <p className="mt-1.5 truncate text-h4 text-ink">{next.obligation.name}</p>
+          <p className="mt-1.5 truncate text-h4 text-ink">{next.name}</p>
           <p className="mt-0.5 text-caption text-ink-muted">
-            Due {formatWeekdayMonthDay(next.dueDate)} · {relativeDaysLabel(dueIn)}
+            {next.kind === "debtMinimum" ? "Minimum payment · " : ""}Due{" "}
+            {formatWeekdayMonthDay(next.dueDate)} · {relativeDaysLabel(dueIn)}
           </p>
         </div>
-        <Money cents={next.obligation.amountCents} className="shrink-0 text-num-lg text-ink" />
+        <Money cents={next.amountCents} className="shrink-0 text-num-lg text-ink" />
       </div>
     </Card>
   );
@@ -281,7 +297,7 @@ function NextActionCard({ plan }: { plan: HomePlan }) {
     body =
       "Trim this cycle's goals or giving, or move a non-essential bill to after payday. Nothing moves automatically — this is a plan, not a transfer.";
   } else if (next) {
-    title = `Set aside ${formatDollars(next.obligation.amountCents)} for ${next.obligation.name} by ${formatWeekdayMonthDay(next.dueDate)}.`;
+    title = `Set aside ${formatDollars(next.amountCents)} for ${next.name} by ${formatWeekdayMonthDay(next.dueDate)}.`;
     body = `That keeps the bill covered before your next paycheck, with ${formatDollars(result.remainingCents)} left over for everything else.`;
   } else {
     title = `Keep ${formatDollars(result.remainingCents)} available this cycle.`;

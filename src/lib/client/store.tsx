@@ -35,6 +35,7 @@ import {
   withAddedTransaction,
   withAllRulesPaused,
   withDebtExtraBudget,
+  withAdoptedDebtExtra,
   withDeletedAccount,
   withDuplicateIgnored,
   withGivingPlan,
@@ -88,6 +89,8 @@ export interface ClientStore {
   setGoalPriority(goalId: string, priority: number): void;
   /** Set the monthly extra debt budget used by both debt strategies. */
   setDebtExtraBudget(cents: number): void;
+  /** Adopt a monthly extra debt payment — flows into the Home plan. */
+  setAdoptedDebtExtra(cents: number): void;
   /* ---------------------------------------------------- Phase 3c edits */
   /** Add a manual/simulated account record. */
   addAccount(account: Account): void;
@@ -186,6 +189,10 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
     (cents: number) => mutate((h) => withDebtExtraBudget(h, cents)),
     [mutate],
   );
+  const setAdoptedDebtExtra = useCallback(
+    (cents: number) => mutate((h) => withAdoptedDebtExtra(h, cents)),
+    [mutate],
+  );
 
   /* ---------------------------------------------------- Phase 3c actions */
   const addAccount = useCallback(
@@ -254,6 +261,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       setAllRulesPaused,
       setGoalPriority,
       setDebtExtraBudget,
+      setAdoptedDebtExtra,
       addAccount,
       deleteAccount,
       addTransaction,
@@ -279,6 +287,7 @@ export function ClientDataProvider({ children }: { children: ReactNode }) {
       setAllRulesPaused,
       setGoalPriority,
       setDebtExtraBudget,
+      setAdoptedDebtExtra,
       addAccount,
       deleteAccount,
       addTransaction,

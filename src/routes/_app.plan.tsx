@@ -12,10 +12,11 @@ import { TextField } from "~/components/TextField";
 import { DonutChart } from "~/components/charts";
 import { PlanIcon, WarningIcon } from "~/components/icons";
 import { useClientData } from "~/lib/client/store";
-import { todayISO, formatWeekdayMonthDay } from "~/lib/client/dates";
+import { todayISO, formatCycleRange, formatWeekdayMonthDay, formatPayoffDateLabel } from "~/lib/client/dates";
 import { buildHomePlan } from "~/lib/client/plan";
 import {
   automationRuleViews,
+  cycleDebtMinimumsView,
   cycleObligationsView,
   debtStrategyView,
   DEBT_GROUP_ORDER,
@@ -83,7 +84,7 @@ function BillsSection({ household }: { household: Household }) {
   );
   const cycleLabel =
     view.windowStart && view.windowEnd
-      ? `${formatWeekdayMonthDay(view.windowStart).slice(0, -4)} → ${formatWeekdayMonthDay(view.windowEnd)}`
+      ? formatCycleRange(view.windowStart, view.windowEnd)
       : "this cycle";
   return (
     <section aria-labelledby="plan-bills">
@@ -146,11 +147,80 @@ function BillsSection({ household }: { household: Household }) {
   );
 }
 
+/* ------------------------------------------------ 1b. minimums this cycle */
+
+function MinimumsThisCycle({ household }: { household: Household }) {
+  const view = useMemo(() => cycleDebtMinimumsView(household), [household]);
+  if (view.audit.length === 0) return null;
+  return (
+    <div className="mt-4 rounded-control border border-line-faint bg-surface-sunken/50 p-3">
+      <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
+        Minimum payments this cycle (each counted once)
+      </p>
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {view.audit.map((row) => {
+          const inWindow = row.status === "inWindow";
+          return (
+            <li
+              key={row.debt.id}
+              className="flex items-baseline justify-between gap-3 text-body-sm"
+            >
+              <span className="min-w-0">
+                <span className="text-ink">{row.debt.name}</span>
+                <span className="text-caption text-ink-muted">
+                  {" "}
+                  {row.status === "inWindow"
+                    ? `— due ${row.dueDate}`
+                    : row.status === "noDueDate"
+                      ? "— due date unknown"
+                      : row.status === "paidOnRecord"
+                        ? "— paid on record"
+                        : "— after this cycle"}
+                </span>
+              </span>
+              <span
+                className={
+                  inWindow
+                    ? "shrink-0 text-num font-medium text-ink"
+                    : "shrink-0 text-caption text-ink-muted"
+                }
+              >
+                {inWindow ? (
+                  <Money cents={row.debt.minPaymentCents} />
+                ) : (
+                  <span className="rounded-pill border border-line-strong bg-surface-raised px-2 py-0.5 text-caption text-ink-muted">
+                    {row.status === "paidOnRecord"
+                      ? "covered by a dated payment"
+                      : row.status === "afterWindow"
+                        ? "a future window"
+                        : "due date unknown"}
+                  </span>
+                )}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-2 text-caption leading-relaxed text-ink-muted">
+        {view.inWindowCents > 0
+          ? `${formatDollars(view.inWindowCents)} is deducted from this cycle's plan on Home — minimums are never subtracted from every paycheck.`
+          : "No minimum is due inside this cycle's window."}
+        {view.paidOnRecordCount > 0
+          ? " Minimums already covered by a dated payment are never re-deducted."
+          : ""}{" "}
+        {view.noDueDateCount > 0
+          ? "Debts with no due date on record are labeled 'due date unknown' — never assumed."
+          : ""}
+      </p>
+    </div>
+  );
+}
+
 /* --------------------------------------------------- 2. debt strategies */
 
 function DebtSection({ household }: { household: Household }) {
   const today = todayISO();
-  const { setDebtExtraBudget } = useClientData();
+  const { setDebtExtraBudget, setAdoptedDebtExtra } = useClientData();
   const view = useMemo(
     () => debtStrategyView(household, today),
     [household, today],
@@ -210,29 +280,78 @@ function DebtSection({ household }: { household: Household }) {
         note={`Both scenarios keep every minimum payment and add the same extra budget. Payoff dates and interest are ESTIMATES — today's balances, rates, and minimums held constant.`}
       />
       <Card className="mt-3">
-        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
-          <div onBlur={commit}>
-            <TextField
-              label="Extra debt payment budget"
-              prefix="$"
-              suffix="/month"
-              numeric
-              value={draft}
-              onChange={setDraft}
-              hint="Used by both scenarios. Estimates only — this is a plan, not a transfer."
-            />
-          </div>
-          <div className="rounded-control border border-line-strong bg-surface-sunken px-3.5 py-3">
-            <p className="text-caption font-medium text-ink-muted">Monthly cash toward debt</p>
-            <p className="mt-0.5 text-num text-ink">
-              <Money cents={monthlyTotalCents} />{" "}
-              <span className="text-caption font-normal text-ink-muted">
-                = minimums <Money cents={minimumsCents} /> + extra{" "}
-                <Money cents={extraBudgetCents} />
-              </span>
+        <div className="rounded-control border border-brand-200/60 bg-brand-50/50 p-3.5 dark:bg-brand-100/10">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
+              What-if scenario — not included in your current plan
             </p>
+            {view.whatIfMatchesAdopted ? (
+              <span className="rounded-pill border border-success/40 bg-success-soft px-2 py-0.5 text-caption font-semibold text-success">
+                adopted into your plan
+              </span>
+            ) : view.adoptedExtraCents > 0 ? (
+              <span className="rounded-pill border border-line-strong bg-surface-sunken px-2 py-0.5 text-caption font-medium text-ink-muted">
+                adopted: {formatDollars(view.adoptedExtraCents)}/mo — a
+                different amount
+              </span>
+            ) : null}
           </div>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2 sm:items-end">
+            <div onBlur={commit}>
+              <TextField
+                label="Extra debt payment (what-if)"
+                prefix="$"
+                suffix="/month"
+                numeric
+                value={draft}
+                onChange={setDraft}
+                hint="Feeds the two scenarios below. A scenario is a projection — nothing moves and nothing is deducted from your plan until you adopt it."
+              />
+            </div>
+            <div className="rounded-control border border-line-strong bg-surface-sunken px-3.5 py-3">
+              <p className="text-caption font-medium text-ink-muted">Monthly cash toward debt (what-if)</p>
+              <p className="mt-0.5 text-num text-ink">
+                <Money cents={monthlyTotalCents} />{" "}
+                <span className="text-caption font-normal text-ink-muted">
+                  = minimums <Money cents={minimumsCents} /> + extra{" "}
+                  <Money cents={extraBudgetCents} />
+                </span>
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 text-body-sm text-ink-muted">
+              {view.adoptedExtraCents > 0 ? (
+                <>
+                  Adopted: <Money cents={view.adoptedExtraCents} />/mo extra (
+                  <Money cents={view.adoptedPerCheckCents} /> this check) is
+                  committed on Home — as long as it stays adopted.
+                </>
+              ) : (
+                "Nothing is adopted yet — the scenario above never touches your Home plan."
+              )}
+            </div>
+            <Button
+              size="sm"
+              disabled={view.whatIfMatchesAdopted}
+              onClick={() => setAdoptedDebtExtra(extraBudgetCents)}
+            >
+              {view.whatIfMatchesAdopted ? "Adopted" : "Apply to my plan"}
+            </Button>
+          </div>
+          {view.gap.computed && view.gap.gapCents > 0 ? (
+            <p className="mt-3 rounded-control bg-warning-soft px-2.5 py-1.5 text-caption leading-relaxed text-warning">
+              Funding gap: this scenario's {formatDollars(view.gap.extraPerCheckCents)}/check
+              extra plus {formatDollars(view.gap.minimumsPerCycleCents)} of minimums
+              exceeds what's left after this cycle's bills, essentials, and
+              buffer by {formatDollars(view.gap.gapCents)}. A scenario can show a
+              gap without being executable — adopt only what your plan can
+              actually afford.
+            </p>
+          ) : null}
         </div>
+
+        <MinimumsThisCycle household={household} />
 
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {strategies.map((s) => {
@@ -274,9 +393,9 @@ function DebtSection({ household }: { household: Household }) {
                   </div>
                   <div className="flex items-baseline justify-between gap-3">
                     <dt className="text-ink-muted">Debt-free by (estimate)</dt>
-                    <dd className="text-num text-ink">
+                    <dd className="text-right text-num text-ink">
                       {r.lastPayoffDate
-                        ? formatWeekdayMonthDay(r.lastPayoffDate)
+                        ? formatPayoffDateLabel(r.lastPayoffMonth, r.lastPayoffDate)
                         : "Beyond the modeled horizon"}
                     </dd>
                   </div>
@@ -309,10 +428,10 @@ function DebtSection({ household }: { household: Household }) {
                               </p>
                             </div>
                             <div className="shrink-0 text-right">
-                              <p className="text-caption text-ink-muted">paid off</p>
+                              <p className="text-caption text-ink-muted">Projected payoff</p>
                               <p className="text-body-sm font-medium text-ink">
                                 {row.payoffDate
-                                  ? formatWeekdayMonthDay(row.payoffDate)
+                                  ? formatPayoffDateLabel(row.payoffMonth, row.payoffDate)
                                   : "—"}
                               </p>
                               <p className="text-caption text-ink-muted">
@@ -340,6 +459,11 @@ function DebtSection({ household }: { household: Household }) {
           <li className="text-caption leading-relaxed text-ink-faint">
             · No refinancing advice and no forgiveness assumptions are made here —
             this compares payment order only.
+          </li>
+          <li className="text-caption leading-relaxed text-ink-faint">
+            · The scenarios above are what-if comparisons. Only an adopted extra
+            payment is included in your Home plan, and an unaffordable adopted
+            amount shows up as a shortfall — never hidden.
           </li>
         </ul>
       </Card>
@@ -506,7 +630,7 @@ function GivingSection({ household }: { household: Household }) {
     setEditorOpen(false);
   };
 
-  const skipped = view.impact?.skipped ?? true;
+  const skipped = view.skipped;
 
   return (
     <section
@@ -525,8 +649,8 @@ function GivingSection({ household }: { household: Household }) {
             <div>
               <p className="text-h4 text-ink">Skipped</p>
               <p className="mt-0.5 text-body-sm text-ink-muted">
-                No gift is planned for this period — nothing is deducted for
-                giving.
+                {view.resolutionNote ??
+                  "No gift is planned for this period — nothing is deducted for giving."}
               </p>
             </div>
             <Button variant="secondary" size="sm" onClick={openEditor}>
@@ -536,13 +660,13 @@ function GivingSection({ household }: { household: Household }) {
         ) : (
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-h4 text-ink">{view.amountNote}</p>
+              <p className="text-h4 text-ink">{view.label.amountNote}</p>
               <p className="mt-0.5 text-caption text-ink-muted">
-                Planned {view.scheduleLabel} · basis: {view.basisLabel}
+                {view.label.frequencyNote} · basis: {view.plan.basis === "gross" ? "gross pay" : "net pay"}
               </p>
               <dl className="mt-3 flex flex-col gap-1 text-body-sm">
                 <div className="flex items-baseline justify-between gap-6">
-                  <dt className="text-ink-muted">This period (per check)</dt>
+                  <dt className="text-ink-muted">{view.periodRowLabel}</dt>
                   <dd className="text-num text-ink">
                     {view.cycleGivingCents === null ? (
                       "—"
@@ -555,7 +679,7 @@ function GivingSection({ household }: { household: Household }) {
                   <>
                     <div className="flex items-baseline justify-between gap-6">
                       <dt className="text-ink-muted">
-                        Share of {view.basisLabel} (estimate)
+                        Share of {view.plan.basis === "gross" ? "gross" : "net"} pay this period (estimate)
                       </dt>
                       <dd className="text-num text-ink">
                         {view.impact.percentBps === null
@@ -565,7 +689,7 @@ function GivingSection({ household }: { household: Household }) {
                     </div>
                     <div className="flex items-baseline justify-between gap-6">
                       <dt className="text-ink-muted">
-                        Share of this month's bills + goal allocations (estimate)
+                        Share of this period's bills + goal allocations (estimate)
                       </dt>
                       <dd className="text-num text-ink">
                         {view.impact.shareOfCommitmentsBps === null
@@ -583,8 +707,15 @@ function GivingSection({ household }: { household: Household }) {
           </div>
         )}
         <p className="mt-3 border-t border-line-faint pt-2.5 text-caption leading-relaxed text-ink-muted">
-          {view.impact?.note}
+          {view.label.perCheckNote ??
+            view.resolutionNote ??
+            "Giving is optional and chosen by you — nothing moves automatically."}
         </p>
+        {view.label.shareOfNetNote ? (
+          <p className="mt-1 text-caption leading-relaxed text-ink-muted">
+            {view.label.shareOfNetNote}
+          </p>
+        ) : null}
       </Card>
 
       <Sheet
@@ -626,12 +757,12 @@ function GivingSection({ household }: { household: Household }) {
           </div>
           {draftMode === "fixed" ? (
             <TextField
-              label="Amount per period"
+              label={`Amount (${view.plan.frequency === "monthly" ? "per month" : view.plan.frequency === "weekly" ? "per week" : view.plan.frequency === "twiceMonthly" ? "per occurrence — twice a month" : "per occurrence — every 2 weeks"})`}
               prefix="$"
               numeric
               value={draftAmount}
               onChange={setDraftAmount}
-              hint={`Planned ${household.givingPlan.schedule} in this prototype.`}
+              hint={view.label.perCheckNote ?? undefined}
             />
           ) : (
             <TextField

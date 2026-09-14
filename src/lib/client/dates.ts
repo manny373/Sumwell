@@ -105,6 +105,59 @@ export function formatWeekdayMonthDay(iso: string): string {
   return weekdayMonthDayFormatter.format(new Date(Date.UTC(y, m - 1, d)));
 }
 
+/** "Sep 25, 2026" — weekday + month day + YEAR. */
+export function formatWeekdayMonthDayYear(iso: string): string {
+  const { y, m, d } = parseISODate(iso);
+  return weekdayMonthDayYearFormatter.format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+const weekdayMonthDayYearFormatter = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+/** "Dec 2026" — month + year for long projections (never a bare day). */
+export function formatMonthYear(iso: string): string {
+  const { y, m } = parseISODate(iso);
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(y, m - 1, 1)));
+}
+
+/**
+ * Full, wrap-safe cycle range label: "Thu, Sep 10 – Thu, Sep 25". The year is
+ * included on both ends when the range crosses into a new year. Callers must
+ * allow wrapping (CSS) — this function never truncates mid-word.
+ */
+export function formatCycleRange(startISO: string, endISO: string): string {
+  const { y: sy } = parseISODate(startISO);
+  const { y: ey } = parseISODate(endISO);
+  if (sy !== ey) {
+    return `${formatWeekdayMonthDayYear(startISO)} – ${formatWeekdayMonthDayYear(endISO)}`;
+  }
+  return `${formatWeekdayMonthDay(startISO)} – ${formatWeekdayMonthDay(endISO)}`;
+}
+
+/**
+ * Payoff label for projections: "Dec 2026 (~16 months)". The iso/null forms
+ * cover "not paid within the horizon". The label never claims the debt is
+ * paid off today — payoff is always projected.
+ */
+export function formatPayoffDateLabel(
+  payoffMonth: number | null,
+  payoffDateISO: string | null,
+): string {
+  if (payoffMonth === null || payoffDateISO === null) {
+    return "Beyond the modeled horizon";
+  }
+  return `${formatMonthYear(payoffDateISO)} (~${payoffMonth} months)`;
+}
+
 /** Today as an ISO date, in the viewer's LOCAL timezone. */
 export function todayISO(): string {
   const now = new Date();

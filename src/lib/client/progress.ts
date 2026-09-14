@@ -1,13 +1,24 @@
 /**
- * Progress screen view builders — Phase 3b.
+ * Progress screen view builders — Phase 3b + Phase 4a (Finding 5).
  *
  * Confirmed changes are derived ONLY from dated, sourced records (transactions
  * and confirmed goal contributions) — never from the plan and never from the
  * app itself. Projected line items stay in a separate channel with an "if you
  * follow this plan" label. Nothing here credits Sumwell with progress.
+ *
+ * Evidence model (Phase 4a):
+ *   - A recorded payment supports exactly "Payment recorded — $X" plus the
+ *     balance TODAY. A NET balance reduction claim requires comparable dated
+ *     balances over a defined period; the seed has no balance history, so the
+ *     app never infers a reduction or interest savings from a payment alone.
+ *   - Every change carries an evidenceId; "View evidence" resolves to the
+ *     actual transaction/contribution record via evidenceRecordFor.
+ *   - Internal record ids appear ONLY inside a labeled technical-details
+ *     affordance (the UI renders `<details>`), never in ordinary copy.
  */
 import { goalProgress } from "~/lib/finance/goals";
-import type { GoalContribution } from "~/lib/finance/types";
+import type { GoalContribution, Transaction } from "~/lib/finance/types";
+import { formatCents } from "~/lib/money";
 import { householdGoalContributions } from "./household";
 import { lastReceivedPaycheck } from "./plan";
 import { projectedGoalContributions } from "./planScreen";
@@ -15,7 +26,7 @@ import type { Household } from "./types";
 
 export type ConfirmedChangeKind =
   | "debtPrincipalPaid"
-  | "debtBalanceReduced"
+  | "debtPaymentRecorded"
   | "savingsContribution";
 
 /** One dated, evidenced change. `amountCents` is the positive magnitude. */
@@ -25,9 +36,19 @@ export interface ConfirmedChange {
   kind: ConfirmedChangeKind;
   title: string;
   amountCents: number;
-  /** Where the evidence lives (a dated transaction or entry). */
+  /** Factual copy about the RECORD only — no inferred reductions/savings. */
   detail: string;
+  /** The transaction or contribution id that is this change's evidence. */
   evidenceId: string;
+  /**
+   * Balance TODAY from the account record, when the change is a payment into
+   * an account that carries a known balance. A balance figure is stated as
+   * "balance today" and never spun into a "reduction" claim.
+   */
+  balanceTodayCents: number | null;
+  balanceTodayAccountName: string | null;
+  /** Internal record reference for the technical-details affordance. */
+  technicalId: string;
 }
 
 const CREDIT_ACCOUNT_TYPES = new Set([
@@ -38,9 +59,40 @@ const CREDIT_ACCOUNT_TYPES = new Set([
   "mortgage",
 ]);
 
+function paymentEvidenceTxn(household: Household, txn: Transaction): ConfirmedChange | null {
+  const byId = new Map(household.accounts.map((a) => [a.id, a]));
+  const account = byId.get(txn.accountId);
+  if (!account) return null;
+  // Payments INTO a credit/loan account (positive transfer) or loan payments.
+  const isCreditPayment =
+    txn.kind === "transfer" && txn.amountCents > 0 && CREDIT_ACCOUNT_TYPES.has(account.type);
+  if (isCreditPayment) {
+    const owed = household.debts.find(
+      (d) => d.accountId === account.id,
+    );
+    return {
+      id: `credit-${txn.id}`,
+      date: txn.transactedAt,
+      kind: "debtPaymentRecorded" as const,
+      title: "Payment recorded",
+      amountCents: txn.amountCents,
+      detail: `A payment of ${formatCents(txn.amountCents)} to ${account.name} is on record. This records the payment itself — a change in the balance would need dated balances over a defined period, and none are on record yet.`,
+      evidenceId: txn.id,
+      balanceTodayCents:
+        owed !== undefined
+          ? owed.balanceCents
+          : account.currentBalanceCents !== null
+            ? -account.currentBalanceCents
+            : null,
+      balanceTodayAccountName: owed !== undefined ? owed.name : null,
+      technicalId: txn.id,
+    };
+  }
+  return null;
+}
+
 /** Debt principals paid and balances reduced — straight from transactions. */
 export function confirmedDebtChanges(household: Household): ConfirmedChange[] {
-  const byId = new Map(household.accounts.map((a) => [a.id, a]));
   const changes: ConfirmedChange[] = [];
   for (const txn of household.transactions) {
     if (txn.status === "pending") continue; // not confirmed until posted
@@ -51,28 +103,16 @@ export function confirmedDebtChanges(household: Household): ConfirmedChange[] {
         kind: "debtPrincipalPaid",
         title: "Debt principal paid",
         amountCents: txn.principalCents,
-        detail: `${txn.merchant} — payment on record (principal portion; interest is separate).`,
+        detail: `${txn.merchant} — payment on record; the principal portion is stated on the record itself (interest is separate).`,
         evidenceId: txn.id,
+        balanceTodayCents: null,
+        balanceTodayAccountName: null,
+        technicalId: txn.id,
       });
       continue;
     }
-    const account = byId.get(txn.accountId);
-    if (
-      txn.kind === "transfer" &&
-      txn.amountCents > 0 &&
-      account &&
-      CREDIT_ACCOUNT_TYPES.has(account.type)
-    ) {
-      changes.push({
-        id: `credit-${txn.id}`,
-        date: txn.transactedAt,
-        kind: "debtBalanceReduced",
-        title: `${account.name} balance reduced`,
-        amountCents: txn.amountCents,
-        detail: `${txn.merchant} — payment on record.`,
-        evidenceId: txn.id,
-      });
-    }
+    const payment = paymentEvidenceTxn(household, txn);
+    if (payment) changes.push(payment);
   }
   return changes;
 }
@@ -92,6 +132,9 @@ export function confirmedGoalChanges(household: Household): ConfirmedChange[] {
         c.note ??
         `Deposit on record for ${c.date}.`,
       evidenceId: c.id,
+      balanceTodayCents: null,
+      balanceTodayAccountName: null,
+      technicalId: c.id,
     }));
 }
 
@@ -99,6 +142,66 @@ export function confirmedGoalChanges(household: Household): ConfirmedChange[] {
 export function allConfirmedChanges(household: Household): ConfirmedChange[] {
   return [...confirmedDebtChanges(household), ...confirmedGoalChanges(household)]
     .sort((a, b) => (a.date === b.date ? a.id.localeCompare(b.id) : a.date < b.date ? 1 : -1));
+}
+
+/* ------------------------------------------------------------ evidence -- */
+
+export interface EvidenceRecord {
+  /** What kind of record backs this change. */
+  recordType: "transaction" | "goalContribution";
+  /** Human heading shown in the evidence view. */
+  heading: string;
+  /** Field/value rows rendered from the ACTUAL record (no inference). */
+  rows: Array<{ label: string; value: string }>;
+  /** The raw record id — only for the technical-details affordance. */
+  technicalId: string;
+}
+
+/**
+ * Resolve a confirmed change to the ACTUAL record that evidences it. Returns
+ * null when the record no longer exists — the UI must say "record not found"
+ * rather than invent one.
+ */
+export function evidenceRecordFor(
+  household: Household,
+  change: ConfirmedChange,
+): EvidenceRecord | null {
+  const txn = household.transactions.find((t) => t.id === change.evidenceId);
+  if (txn) {
+    const account = household.accounts.find((a) => a.id === txn.accountId);
+    return {
+      recordType: "transaction",
+      heading: `${txn.merchant} — ${txn.status === "posted" ? "posted" : "pending"}`,
+      rows: [
+        { label: "Date", value: txn.transactedAt },
+        { label: "Account", value: account?.name ?? "Unknown account" },
+        {
+          label: "Amount",
+          value: formatCents(txn.amountCents, { signed: true }),
+        },
+        { label: "Status", value: txn.status },
+        { label: "Source", value: txn.source },
+      ],
+      technicalId: txn.id,
+    };
+  }
+  const contribution = householdGoalContributions(household).find(
+    (c) => c.id === change.evidenceId,
+  );
+  if (contribution) {
+    return {
+      recordType: "goalContribution",
+      heading: `Goal contribution on record`,
+      rows: [
+        { label: "Date", value: contribution.date },
+        { label: "Amount", value: formatCents(contribution.amountCents) },
+        { label: "Source", value: contribution.source },
+        { label: "Confirmed", value: contribution.confirmed ? "yes" : "no" },
+      ],
+      technicalId: contribution.id,
+    };
+  }
+  return null;
 }
 
 export interface CheckInSummary {

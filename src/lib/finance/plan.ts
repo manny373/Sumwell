@@ -25,12 +25,16 @@ export interface PlanResult {
   obligationsDeductedCents: number;
   /** Obligations already inside the available balance — shown, not deducted. */
   obligationsReflectedCents: number;
+  /** Debt minimums due INSIDE this period (each represented exactly once). */
+  debtMinimumsCents: number;
+  /** Adopted extra debt payment for this period (0 when nothing adopted). */
+  debtExtraCents: number;
   essentialsCents: number;
   goalsCents: number;
   /** Amount given this period (0 when skipped). */
   givingCents: number;
   bufferCents: number;
-  /** available − (deducted obligations + essentials + goals + giving + buffer). */
+  /** available − (deducted obligations + debt mins + adopted extra + essentials + goals + giving + buffer). */
   totalDeductedCents: number;
   /** NEGATIVE when shortfall — kept exact, never rounded away. */
   remainingCents: number;
@@ -44,14 +48,32 @@ export interface PlanResult {
 }
 
 /**
+ * A debt minimum payment due inside this paycheck window. Derived by the
+ * cycle audit (each debt's minimum lands in exactly ONE window); the plan
+ * deducts it exactly once and never subtracts every monthly minimum from
+ * every paycheck.
+ */
+export interface DebtMinimumDeduction {
+  debtId: string;
+  name: string;
+  /** Positive magnitude of the minimum payment. */
+  amountCents: number;
+  note?: string;
+}
+
+/**
  * remaining = available
  *           − obligations NOT already reflected in available
+ *           − debt minimums due in-window (each exactly once)
+ *           − adopted extra debt payment for this period
  *           − essentialsCents
  *           − accepted goals + giving
  *           − bufferCents
  *
  * Pending transactions that already sit inside `availableCents` are passed as
  * obligations with `alreadyReflected: true` and are never subtracted again.
+ * Minimums already paid on record are NOT passed here — they are represented
+ * by their dated transaction instead.
  */
 export function planForPaycheck(
   paycheck: Paycheck,
@@ -61,10 +83,17 @@ export function planForPaycheck(
   givingCents: number | null,
   bufferCents: number,
   availableCents: number,
+  debtMinimums: readonly DebtMinimumDeduction[] = [],
+  debtExtraCents = 0,
 ): PlanResult {
-  for (const amount of [essentialsCents, givingCents ?? 0, bufferCents, availableCents]) {
+  for (const amount of [essentialsCents, givingCents ?? 0, bufferCents, availableCents, debtExtraCents]) {
     if (!Number.isSafeInteger(amount)) {
       throw new Error("planForPaycheck: amounts must be integer cents");
+    }
+  }
+  for (const d of debtMinimums) {
+    if (!Number.isSafeInteger(d.amountCents)) {
+      throw new Error("planForPaycheck: debt minimum amounts must be integer cents");
     }
   }
 
@@ -77,8 +106,16 @@ export function planForPaycheck(
   const goalsCents = goals.reduce((sum, g) => sum + g.amountCents, 0);
   const giving = givingCents === null ? 0 : givingCents;
 
+  const debtMinimumsCents = debtMinimums.reduce((sum, d) => sum + d.amountCents, 0);
+
   const totalDeductedCents =
-    obligationsDeductedCents + essentialsCents + goalsCents + giving + bufferCents;
+    obligationsDeductedCents +
+    debtMinimumsCents +
+    debtExtraCents +
+    essentialsCents +
+    goalsCents +
+    giving +
+    bufferCents;
 
   const remainingCents = availableCents - totalDeductedCents;
   const isShortfall = remainingCents < 0;
@@ -94,6 +131,26 @@ export function planForPaycheck(
         ? "Already reflected in the available balance — not deducted again."
         : undefined,
     })),
+    ...debtMinimums.map((d) => ({
+      id: `debt-min-${d.debtId}`,
+      kind: "debtMinimum" as const,
+      name: d.name,
+      amountCents: d.amountCents,
+      deducted: true,
+      note: d.note ?? "Minimum payment due inside this pay window — deducted exactly once.",
+    })),
+    ...(debtExtraCents > 0
+      ? ([
+          {
+            id: "debt-extra",
+            kind: "debtExtra" as const,
+            name: "Adopted extra debt payment",
+            amountCents: debtExtraCents,
+            deducted: true,
+            note: "Extra debt payment you adopted — committed for this period.",
+          },
+        ] as CommitmentLedgerEntry[])
+      : []),
     {
       id: "essentials",
       kind: "essential" as const,
@@ -138,6 +195,8 @@ export function planForPaycheck(
     obligationsTotalCents,
     obligationsDeductedCents,
     obligationsReflectedCents,
+    debtMinimumsCents,
+    debtExtraCents,
     essentialsCents,
     goalsCents,
     givingCents: giving,

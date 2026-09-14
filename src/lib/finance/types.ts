@@ -178,6 +178,11 @@ export interface Debt {
   category: DebtCategory;
   /** Outstanding balance, positive magnitude. */
   balanceCents: number;
+  /**
+   * Account record that carries this debt, when known. Lets the audit map
+   * dated payment transactions to the debt they paid (exactly-once minimums).
+   */
+  accountId?: string | null;
   /** Annual percentage rate in basis points (1 bps = 0.01%). null = unknown. */
   aprBps: number | null;
   aprKind: AprKind;
@@ -187,6 +192,14 @@ export interface Debt {
   minPaymentCents: number;
   /** True when the min payment is an estimate (e.g. 1% of balance) rather than a statement number. */
   minPaymentIsEstimate: boolean;
+  /**
+   * Day of month (1–31) the minimum payment is due, when known. Drives the
+   * per-cycle debt-minimum audit so each minimum lands in exactly one pay
+   * window — never subtracted from every paycheck. null = due date unknown
+   * (surfaced as "due date unknown", never substituted with another bill).
+   */
+  /** Day of month the minimum is due; null or absent = unknown (never assumed). */
+  minPaymentDueDay?: number | null;
   source: DataSource;
   notes?: string;
 }
@@ -227,23 +240,33 @@ export interface GoalContribution {
 export type GivingCategory = "tithe" | "offerings" | "charities" | "mutualAid" | "custom";
 export type GivingMode = "fixed" | "percent";
 export type GivingBasis = "gross" | "net";
-export type GivingSchedule = "perPaycheck" | "monthly" | "annual";
+
+/**
+ * How often the giving plan's amount recurs. `amountCents` (fixed mode) is
+ * denominated PER OCCURRENCE of this cadence. Conversions between "per check"
+ * and "per calendar month" live in finance/giving.ts and treat biweekly (26
+ * checks/yr ≈ 2.1667/mo) and twice-monthly (24 checks/yr, 2/mo) as distinct —
+ * the plan layer never silently assumes two checks per month.
+ */
+export type GivingFrequency = "weekly" | "biweekly" | "twiceMonthly" | "monthly";
 
 /**
  * Optional giving plan. The USER chooses amount/timing/priority — the product
- * never preselects a percentage or implies tax deductibility.
+ * never preselects a percentage or implies tax deductibility. Fixed-mode
+ * amounts are explicit per occurrence of `frequency`; percent-mode applies to
+ * the chosen basis each pay period.
  */
 export interface GivingPlan {
   id: string;
   mode: GivingMode;
-  /** Fixed mode only. */
+  /** Fixed mode only — amount per occurrence of `frequency`. */
   amountCents: number | null;
-  /** Percent mode only (1000 = 10%). */
+  /** Percent mode only (1000 = 10%) — percent of `basis` per pay period. */
   percentBps: number | null;
-  /** What a percent gift applies to. */
+  /** What a percent gift applies to (gross or net pay). */
   basis: GivingBasis;
   categories: GivingCategory[];
-  schedule: GivingSchedule;
+  frequency: GivingFrequency;
   enabled: boolean;
   source: DataSource;
   notes?: string;
@@ -288,7 +311,14 @@ export interface AutomationRule {
   source: DataSource;
 }
 
-export type CommitmentKind = "obligation" | "essential" | "goal" | "giving" | "buffer";
+export type CommitmentKind =
+  | "obligation"
+  | "essential"
+  | "goal"
+  | "giving"
+  | "buffer"
+  | "debtMinimum"
+  | "debtExtra";
 
 /** One line in a plan's commitment ledger. */
 export interface CommitmentLedgerEntry {
