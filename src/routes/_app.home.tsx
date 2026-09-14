@@ -4,65 +4,51 @@ import { Banner } from "~/components/Banner";
 import { Button, buttonClass } from "~/components/Button";
 import { LoadingState } from "~/components/LoadingState";
 import { Money } from "~/components/Money";
-import { ChevronRightIcon, HeartIcon } from "~/components/icons";
+import { Expandable } from "~/components/Expandable";
+import { CheckIcon, ChevronRightIcon, HeartIcon } from "~/components/icons";
 import { useClientData } from "~/lib/client/store";
 import { buildHomePlan, daysUntilDue, type HomePlan } from "~/lib/client/plan";
-import { formatDollars } from "~/lib/money";
-import { todayISO, formatWeekdayMonthDay, relativeDaysLabel } from "~/lib/client/dates";
+import { homePrimaryAction } from "~/lib/client/homeAction";
+import { formatCents } from "~/lib/money";
+import {
+  todayISO,
+  formatMonthDay,
+  formatWeekdayMonthDay,
+  relativeDaysLabel,
+} from "~/lib/client/dates";
 import type { Household } from "~/lib/client/types";
+import { cn } from "~/lib/cn";
 
 export const Route = createFileRoute("/_app/home")({
   component: HomeRoute,
 });
 
-/* ------------------------------------------------------------- tiny bits */
+/* --------------------------------------------------- hero: the centerpiece */
 
-function SourceChip({ household }: { household: Household }) {
-  return household.source === "demo" ? (
-    <span className="rounded-pill border border-warning/40 bg-warning-soft px-2.5 py-1 text-caption font-semibold text-warning">
-      Synthetic demo data
-    </span>
-  ) : (
-    <span className="rounded-pill border border-line-strong bg-surface-raised px-2.5 py-1 text-caption font-semibold text-ink-muted">
-      Your numbers · saved on this device
-    </span>
-  );
-}
-
-/* --------------------------------------------- paycheck horizon (card 1) */
-
-function PaycheckHorizonCard({ plan }: { plan: HomePlan }) {
-  const { paycheck, daysUntilPaycheck, incomeUncertain } = plan;
+function EquationRow({
+  label,
+  caption,
+  cents,
+  tone = "ink",
+}: {
+  label: string;
+  caption?: string;
+  cents: number;
+  tone?: "ink" | "danger";
+}) {
   return (
-    <Card>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
-            Next paycheck
-          </p>
-          <p className="mt-1.5 text-num-lg text-ink">
-            {formatWeekdayMonthDay(paycheck.date)}
-          </p>
-          <p className="mt-1 text-caption text-ink-muted">
-            {paycheck.employer} · <Money cents={paycheck.netCents} />
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <span className="rounded-pill bg-brand-100 px-2.5 py-1 text-caption font-semibold text-brand-800 dark:bg-brand-100/40 dark:text-brand-900">
-            {daysUntilPaycheck === 0 ? "today" : `${daysUntilPaycheck} days away`}
-          </span>
-          {incomeUncertain ? (
-            <span className="rounded-pill border border-line-strong bg-surface-sunken px-2.5 py-1 text-caption font-medium text-ink-muted">
-              Estimated until received
-            </span>
-          ) : null}
-        </div>
+    <div className="flex items-baseline justify-between gap-4 py-1.5">
+      <div className="min-w-0">
+        <p className="text-body-sm font-medium text-ink">{label}</p>
+        {caption ? <p className="truncate text-caption text-ink-faint">{caption}</p> : null}
       </div>
-    </Card>
+      <Money
+        cents={cents}
+        className={`shrink-0 text-num ${tone === "danger" ? "text-danger" : "text-ink"}`}
+      />
+    </div>
   );
 }
-
-/* ------------------------------------------- remaining money (card 2) */
 
 function PlanSegmentsBar({ plan }: { plan: HomePlan }) {
   const { plan: result, availableCents } = plan;
@@ -95,7 +81,7 @@ function PlanSegmentsBar({ plan }: { plan: HomePlan }) {
     <div className="flex flex-col gap-2">
       <svg
         role="img"
-        aria-label={`${formatDollars(availableCents)} available, split into bills, essentials, goals and giving, buffer, and ${remainingLabel} of ${formatDollars(Math.abs(result.remainingCents))}`}
+        aria-label={`${formatCents(availableCents)} available, split into bills, essentials, goals and giving, buffer, and ${remainingLabel} of ${formatCents(Math.abs(result.remainingCents))}`}
         viewBox="0 0 100 10"
         className="h-2.5 w-full rounded-full"
         preserveAspectRatio="none"
@@ -129,220 +115,176 @@ function PlanSegmentsBar({ plan }: { plan: HomePlan }) {
   );
 }
 
-function EquationRow({
-  label,
-  caption,
-  cents,
-  tone = "ink",
-}: {
-  label: string;
-  caption?: string;
-  cents: number;
-  tone?: "ink" | "danger";
-}) {
+function ClaimStatusPill({ household }: { household: Household }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-1.5">
-      <div className="min-w-0">
-        <p className="text-body-sm font-medium text-ink">{label}</p>
-        {caption ? <p className="truncate text-caption text-ink-faint">{caption}</p> : null}
-      </div>
-      <Money
-        cents={cents}
-        className={`shrink-0 text-num ${tone === "danger" ? "text-danger" : "text-ink"}`}
-      />
-    </div>
+    <span className="rounded-pill border border-line-strong bg-surface-sunken px-2.5 py-1 text-caption font-medium text-ink-muted">
+      estimate{household.source === "demo" ? " — demo data" : " — your numbers"}
+    </span>
   );
 }
 
-function RemainingMoneyCard({ plan, household }: { plan: HomePlan; household: Household }) {
+function HeroCard({ plan, household }: { plan: HomePlan; household: Household }) {
   const result = plan.plan;
-  const goalsGivingCents = result.goalsCents + result.givingCents;
+  const action = homePrimaryAction(household, plan);
+  const shortfall = result.isShortfall;
   const goalNames = household.assumptions.goalContributions.map((g) => g.name).join(" · ");
 
   return (
-    <Card>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
-          Estimated remaining money
-        </p>
-        <span className="rounded-pill border border-line-strong bg-surface-sunken px-2 py-0.5 text-caption text-ink-muted">
-          estimate
-        </span>
-      </div>
-
-      <div className="mt-3">
-        <PlanSegmentsBar plan={plan} />
-      </div>
-
-      <div className="mt-4 border-t border-line-faint pt-2">
-        <EquationRow
-          label="Available"
-          caption="From your checking balance"
-          cents={plan.availableCents!}
-        />
-        <EquationRow
-          label="Obligations"
-          caption={`${plan.obligations.length} ${plan.obligations.length === 1 ? "bill" : "bills"} due before the next paycheck`}
-          cents={result.obligationsDeductedCents}
-        />
-        {result.debtMinimumsCents > 0 ? (
-          <EquationRow
-            label="Debt minimums"
-            caption={`${plan.debtMinimums.length} minimum due before the next paycheck — each counted once`}
-            cents={result.debtMinimumsCents}
-          />
-        ) : null}
-        {result.debtExtraCents > 0 ? (
-          <EquationRow
-            label="Extra debt payment"
-            caption="Adopted on the Plan tab — committed for this period"
-            cents={result.debtExtraCents}
-          />
-        ) : null}
-        <EquationRow
-          label="Essentials"
-          caption="Estimated essential spending this cycle"
-          cents={result.essentialsCents}
-        />
-        <EquationRow
-          label="Goals & giving"
-          caption={
-            [goalNames, plan.givingCents !== null ? "Giving" : null]
-              .filter(Boolean)
-              .join(" · ") || "None this cycle"
-          }
-          cents={goalsGivingCents}
-        />
-        <EquationRow
-          label="Buffer"
-          caption="Kept in checking, not spent"
-          cents={result.bufferCents}
-        />
-      </div>
-
-      <div
-        className={`mt-3 flex items-baseline justify-between gap-4 rounded-control px-3.5 py-3 ${
-          result.isShortfall ? "bg-danger-soft" : "bg-success-soft"
-        }`}
-      >
-        <p className="text-body-sm font-semibold text-ink">
-          {result.isShortfall ? "Plan shortfall (exact)" : "Left over after this plan"}
-        </p>
-        <Money
-          cents={result.remainingCents}
-          options={{ signed: true }}
-          className={`text-num-lg ${
-            result.isShortfall ? "text-danger" : "text-success dark:text-accent-700"
-          }`}
-        />
-      </div>
-      <p className="mt-2 text-caption text-ink-faint">
-        Income is still estimated until the paycheck arrives. Every number above
-        is a plan, not a promise.
-      </p>
-    </Card>
-  );
-}
-
-/* ---------------------------------------------- next obligation (card 3) */
-
-function NextObligationCard({ plan }: { plan: HomePlan }) {
-  const next = plan.nextObligation;
-  if (!next) {
-    return (
-      <Card>
-        <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
-          Next obligation
-        </p>
-        <p className="mt-2 text-h4 text-ink">Nothing due before payday</p>
-        <p className="mt-1 text-body-sm text-ink-muted">
-          No bills or minimum payments are scheduled between now and your next
-          paycheck.
-        </p>
-      </Card>
-    );
-  }
-  const dueIn = daysUntilDue(next.dueDate, todayISO());
-  return (
-    <Card>
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
+    <Card className={cn("overflow-hidden", shortfall && "border-danger/30")}>
+      <div className="flex flex-col gap-4">
+        {/* overline + estimate status */}
+        <div className="flex items-start justify-between gap-3">
           <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
-            Next obligation
+            Estimated remaining
           </p>
-          <p className="mt-1.5 truncate text-h4 text-ink">{next.name}</p>
-          <p className="mt-0.5 text-caption text-ink-muted">
-            {next.kind === "debtMinimum" ? "Minimum payment · " : ""}Due{" "}
-            {formatWeekdayMonthDay(next.dueDate)} · {relativeDaysLabel(dueIn)}
+          <ClaimStatusPill household={household} />
+        </div>
+
+        {/* the large figure + exact horizon */}
+        <div>
+          <Money
+            cents={result.remainingCents}
+            className={cn(
+              "block text-num-xl tabular-nums",
+              shortfall ? "text-danger" : "text-ink",
+            )}
+          />
+          <p className="mt-1.5 text-body-sm text-ink-muted">
+            {shortfall
+              ? `This plan is short by ${formatWeekdayMonthDay(plan.paycheck.date)} unless something changes.`
+              : `Remaining after this cycle's plan — until ${formatMonthDay(plan.paycheck.date)} (${relativeDaysLabel(plan.daysUntilPaycheck)}).`}
           </p>
         </div>
-        <Money cents={next.amountCents} className="shrink-0 text-num-lg text-ink" />
+
+        {/* one next obligation + one primary action (Finding 6/7) */}
+        {!shortfall && action.nextObligation ? (
+          <div className="flex items-center justify-between gap-3 rounded-control border border-line-faint bg-surface-sunken/50 px-3.5 py-2.5">
+            <div className="min-w-0">
+              <p className="truncate text-body-sm font-semibold text-ink">
+                {action.nextObligation.name}
+              </p>
+              <p className="text-caption text-ink-muted">
+                Due {formatWeekdayMonthDay(action.nextObligation.dueDate)} ·{" "}
+                {relativeDaysLabel(daysUntilDue(action.nextObligation.dueDate, todayISO()))}
+              </p>
+            </div>
+            <Money cents={action.nextObligation.amountCents} className="shrink-0 text-num-lg text-ink" />
+          </div>
+        ) : null}
+
+        {action.setAsideNote ? (
+          <p className="flex items-start gap-1.5 text-caption text-ink-muted">
+            <CheckIcon aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+            <span>
+              <strong className="font-semibold text-ink">{action.setAsideNote}.</strong>{" "}
+              {action.kind === "review-bill" && action.nextObligation?.reflected
+                ? "Its cost already left your available balance — nothing to set aside again."
+                : "Funds are set aside on paper only. Nothing moves automatically."}
+            </span>
+          </p>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="min-w-0 flex-1 text-body-sm font-medium text-ink">{action.headline}</p>
+          <Link
+            to="/plan"
+            hash={action.hash ?? undefined}
+            className={buttonClass("primary", "md")}
+          >
+            {action.label}
+          </Link>
+        </div>
+        {action.detail ? (
+          <p className="-mt-1 text-caption leading-relaxed text-ink-muted">{action.detail}</p>
+        ) : null}
+
+        {/* breakdown — collapsed behind a labeled control (Finding 6) */}
+        <Expandable
+          id="home-breakdown"
+          summary={shortfall ? "See the exact shortfall" : "See breakdown"}
+          details="How the remaining number is calculated"
+        >
+          <PlanSegmentsBar plan={plan} />
+          <div className="mt-3 border-t border-line-faint pt-2">
+            <EquationRow
+              label="Available"
+              caption="From your checking balance"
+              cents={plan.availableCents!}
+            />
+            <EquationRow
+              label="Obligations"
+              caption={`${plan.obligations.length} ${plan.obligations.length === 1 ? "bill" : "bills"} due before the next paycheck`}
+              cents={result.obligationsDeductedCents}
+            />
+            {result.debtMinimumsCents > 0 ? (
+              <EquationRow
+                label="Debt minimums"
+                caption={`${plan.debtMinimums.length} minimum due before the next paycheck — each counted once`}
+                cents={result.debtMinimumsCents}
+              />
+            ) : null}
+            {result.debtExtraCents > 0 ? (
+              <EquationRow
+                label="Extra debt payment"
+                caption="Adopted on the Plan tab — committed for this period"
+                cents={result.debtExtraCents}
+              />
+            ) : null}
+            <EquationRow
+              label="Essentials"
+              caption="Estimated essential spending this cycle"
+              cents={result.essentialsCents}
+            />
+            <EquationRow
+              label="Goals & giving"
+              caption={
+                [goalNames, plan.givingCents !== null ? "Giving" : null]
+                  .filter(Boolean)
+                  .join(" · ") || "None this cycle"
+              }
+              cents={result.goalsCents + result.givingCents}
+            />
+            <EquationRow
+              label="Buffer"
+              caption="Kept in checking, not spent"
+              cents={result.bufferCents}
+            />
+            <div
+              className={`mt-2 flex items-baseline justify-between gap-4 rounded-control px-3.5 py-3 ${
+                shortfall ? "bg-danger-soft" : "bg-success-soft"
+              }`}
+            >
+              <p className="text-body-sm font-semibold text-ink">
+                {shortfall ? "Plan shortfall (exact)" : "Left over after this plan"}
+              </p>
+              <Money
+                cents={result.remainingCents}
+                className={`text-num-lg ${
+                  shortfall ? "text-danger" : "text-success dark:text-accent-700"
+                }`}
+              />
+            </div>
+          </div>
+        </Expandable>
+
+        {/* source / freshness + income uncertainty — visible but quiet */}
+        <div className="flex flex-col gap-1 border-t border-line-faint pt-3 text-caption text-ink-faint">
+          <p>
+            {household.label} · updated {formatMonthDay(household.generatedAt)}
+          </p>
+          {plan.incomeUncertain ? (
+            <p>
+              The {formatMonthDay(plan.paycheck.date)} paycheck is estimated until it actually
+              arrives. Every number above is a plan, not a promise.
+            </p>
+          ) : null}
+        </div>
       </div>
     </Card>
   );
 }
 
-/* ------------------------------------------------- next action (card 4) */
-
-function NextActionCard({ plan }: { plan: HomePlan }) {
-  const result = plan.plan;
-  const shortfall = result.shortfallCents;
-  const next = plan.nextObligation;
-
-  let title: string;
-  let body: string;
-
-  if (result.isShortfall) {
-    title = `This plan is short ${formatDollars(shortfall)} by ${formatWeekdayMonthDay(plan.paycheck.date)}.`;
-    body =
-      "Trim this cycle's goals or giving, or move a non-essential bill to after payday. Nothing moves automatically — this is a plan, not a transfer.";
-  } else if (next) {
-    title = `Set aside ${formatDollars(next.amountCents)} for ${next.name} by ${formatWeekdayMonthDay(next.dueDate)}.`;
-    body = `That keeps the bill covered before your next paycheck, with ${formatDollars(result.remainingCents)} left over for everything else.`;
-  } else {
-    title = `Keep ${formatDollars(result.remainingCents)} available this cycle.`;
-    body =
-      "Nothing is due before your next paycheck — spend it, save it, or give it. Your buffer is already set aside.";
-  }
-
-  return (
-    <Card className={result.isShortfall ? "border-danger/30 bg-danger-soft/50" : "border-brand-200/60 bg-brand-50/60 dark:bg-brand-100/20"}>
-      <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
-        One next action
-      </p>
-      <p className="mt-2 text-h4 leading-snug text-ink">{title}</p>
-      <p className="mt-1.5 text-body-sm text-ink-muted">{body}</p>
-    </Card>
-  );
-}
-
-/* ------------------------------------------- accounts route (card 5) */
-
-function AccountsCard({ household }: { household: Household }) {
-  const checking = household.accounts.find((a) => a.type === "checking");
-  return (
-    <Card interactive padded={false} className="overflow-hidden">
-      <Link
-        to="/more"
-        className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-surface-sunken"
-      >
-        <div className="min-w-0">
-          <p className="text-h4 text-ink">Accounts & transactions</p>
-          <p className="mt-0.5 truncate text-body-sm text-ink-muted">
-            {checking
-              ? `${checking.name} · ${formatDollars(
-                  checking.availableBalanceCents ?? checking.currentBalanceCents ?? 0,
-                )} available`
-              : "View your accounts and transactions"}
-          </p>
-        </div>
-        <ChevronRightIcon className="h-5 w-5 shrink-0 text-ink-faint" />
-      </Link>
-    </Card>
-  );
-}
-
-/* ------------------------------- giving shortcut (frequent givers) --- */
+/* --------------------------------------------------- giving shortcut ----- */
 
 /**
  * Spec: frequent-giving households get an optional shortcut. Only shown when
@@ -368,7 +310,7 @@ function GivingShortcutCard({ givingCents }: { givingCents: number | null }) {
             <p className="text-h4 text-ink">Giving plan</p>
             <p className="mt-0.5 truncate text-body-sm text-ink-muted">
               {givingCents !== null
-                ? `${formatDollars(givingCents)} planned this cycle · optional, your choice`
+                ? `${formatCents(givingCents)} planned this cycle · optional, your choice`
                 : "Optional, your choice — view in Plan"}
             </p>
           </div>
@@ -377,6 +319,47 @@ function GivingShortcutCard({ givingCents }: { givingCents: number | null }) {
           View in Plan
           <ChevronRightIcon className="h-5 w-5 shrink-0 text-ink-faint" />
         </div>
+      </Link>
+    </Card>
+  );
+}
+
+/* ------------------------------------------- accounts & all-your-money --- */
+
+function AccountsCard({ household }: { household: Household }) {
+  const checking = household.accounts.find((a) => a.type === "checking");
+  return (
+    <Card interactive padded={false} className="overflow-hidden">
+      <Link
+        to="/more"
+        search={{ view: undefined }}
+        className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-surface-sunken"
+      >
+        <div className="min-w-0">
+          <p className="text-h4 text-ink">Accounts & transactions</p>
+          <p className="mt-0.5 truncate text-body-sm text-ink-muted">
+            {checking
+              ? `${checking.name} · ${formatCents(
+                  checking.availableBalanceCents ?? checking.currentBalanceCents ?? 0,
+                )} available`
+              : "View your accounts and transactions"}
+          </p>
+        </div>
+        <ChevronRightIcon className="h-5 w-5 shrink-0 text-ink-faint" />
+      </Link>
+      <div className="border-t border-line-faint" />
+      <Link
+        to="/more"
+        search={{ view: "overview" }}
+        className="flex items-center justify-between gap-4 px-4 py-4 transition-colors hover:bg-surface-sunken"
+      >
+        <div className="min-w-0">
+          <p className="text-h4 text-ink">All your money</p>
+          <p className="mt-0.5 truncate text-body-sm text-ink-muted">
+            Assets, debts, and net worth — one consolidated view
+          </p>
+        </div>
+        <ChevronRightIcon className="h-5 w-5 shrink-0 text-ink-faint" />
       </Link>
     </Card>
   );
@@ -474,34 +457,24 @@ function HomeRoute() {
 
   return (
     <div className="flex flex-col gap-4">
-      <header className="flex flex-col gap-2.5">
-        <div className="flex items-center justify-between gap-3">
-          <SourceChip household={household} />
-          <Link
-            to="/setup"
-            className="rounded-pill border border-line-strong bg-surface-raised px-3 py-1.5 text-caption font-medium text-ink-muted transition-colors hover:border-brand-600 hover:text-brand-700 dark:hover:text-brand-500"
-          >
-            These are estimates — edit
-          </Link>
-        </div>
+      <header className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-h1 text-ink">Paycheck plan</h1>
           <p className="mt-1 text-body-sm text-ink-muted">
-            {household.label} · updated{" "}
-            {new Date(household.generatedAt).toLocaleString("en-US", {
-              month: "short",
-              day: "numeric",
-            })}
+            {household.label} · updated {formatMonthDay(household.generatedAt)}
           </p>
         </div>
+        <Link
+          to="/setup"
+          className={buttonClass("secondary", "sm")}
+        >
+          Edit plan
+        </Link>
       </header>
 
       {ctx.reason === "ok" && ctx.plan ? (
         <>
-          <PaycheckHorizonCard plan={ctx.plan} />
-          <RemainingMoneyCard plan={ctx.plan} household={household} />
-          <NextObligationCard plan={ctx.plan} />
-          <NextActionCard plan={ctx.plan} />
+          <HeroCard plan={ctx.plan} household={household} />
           {household.givingPlan.enabled ? (
             <GivingShortcutCard givingCents={ctx.plan.givingCents} />
           ) : null}
@@ -540,11 +513,6 @@ function HomeRoute() {
           </Button>
         </div>
       ) : null}
-
-      <p className="text-caption text-ink-faint">
-        Prototype only — not a financial service. Nothing here is connected to a
-        bank, and no transfers move real money.
-      </p>
     </div>
   );
 }

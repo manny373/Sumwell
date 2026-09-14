@@ -7,11 +7,13 @@ import { Skeleton } from "~/components/LoadingState";
 import { Money } from "~/components/Money";
 import { useClientData } from "~/lib/client/store";
 import { buildHomePlan } from "~/lib/client/plan";
+import { allYourMoneyView } from "~/lib/client/overview";
 import { todayISO } from "~/lib/client/dates";
-import { formatDollars } from "~/lib/money";
+import { formatCents } from "~/lib/money";
 import { SourceTimeCaption } from "~/components/more/bits";
 import { AccountCard } from "~/components/more/AccountCard";
 import { ALL_ACCOUNTS, TransactionsView } from "~/components/more/TransactionsView";
+import { OverviewView } from "~/components/more/OverviewView";
 import { AddAccountSheet, AddTransactionSheet } from "~/components/more/FormsSheets";
 import { ImportSheet } from "~/components/more/ImportSheet";
 import { ExportSheet } from "~/components/more/ExportSheet";
@@ -22,30 +24,54 @@ import { SupportView } from "~/components/more/sections/SupportView";
 import { PrivacyView } from "~/components/more/sections/PrivacyView";
 import { SettingsView } from "~/components/more/sections/SettingsView";
 import {
+  ChevronRightIcon,
   DownloadIcon,
   PlusIcon,
   UploadIcon,
   WalletIcon,
 } from "~/components/icons";
+import { cn } from "~/lib/cn";
 
 export const Route = createFileRoute("/_app/more")({
+  /**
+   * Search param support so Home can deep-link to the All-your-money overview
+   * (Finding 10). Internal view state is synced to the URL below.
+   */
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: search.view === "overview" ? ("overview" as const) : undefined,
+  }),
   component: MoreRoute,
 });
 
 type View =
   | { kind: "accounts" }
+  | { kind: "overview" }
   | { kind: "transactions"; accountId: string }
   | { kind: "section"; section: MoreSectionId };
 
 function MoreRoute() {
   const { status, onboarded, loadError, household, startOver } = useClientData();
   const navigate = useNavigate();
-  const [view, setView] = useState<View>({ kind: "accounts" });
+  const routeSearch = Route.useSearch();
+  const [view, setView] = useState<View>(
+    routeSearch.view === "overview" ? { kind: "overview" } : { kind: "accounts" },
+  );
   const [addAccountOpen, setAddAccountOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [addTxnTarget, setAddTxnTarget] = useState<string | null>(null);
   const [sheetNonce, setSheetNonce] = useState(0);
+
+  // Keep the ?view=overview search param in sync with the internal view state
+  // so a refresh stays on the same screen and Home's deep link works once.
+  const setViewAndSearch = (next: View) => {
+    setView(next);
+    void navigate({
+      to: "/more",
+      search: next.kind === "overview" ? { view: "overview" } : { view: undefined },
+      replace: true,
+    });
+  };
 
   const openAddTxn = (accountId: string | null) => {
     setAddTxnTarget(accountId);
@@ -71,7 +97,7 @@ function MoreRoute() {
   const now = todayISO();
   const planCtx = buildHomePlan(household, now);
   const planStale = planCtx.reason === "stale";
-  const demoAccount = household.accounts[0];
+  const overview = allYourMoneyView(household);
 
   return (
     <div className="flex flex-col gap-6">
@@ -118,6 +144,40 @@ function MoreRoute() {
             />
           ) : null}
 
+          {/* all your money — consolidated assets/debts/net worth (Finding 10) */}
+          <Card interactive padded={false} className="overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setViewAndSearch({ kind: "overview" })}
+              className="flex w-full items-center gap-3.5 px-4 py-4 text-left transition-colors hover:bg-surface-sunken"
+            >
+              <span
+                aria-hidden="true"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-control bg-brand-100 text-brand-800 dark:bg-brand-100/40 dark:text-brand-900"
+              >
+                <WalletIcon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-body font-semibold text-ink">All your money</span>
+                <span className="mt-0.5 block text-body-sm text-ink-muted">
+                  Assets, debts, and net worth from one set of records
+                </span>
+              </span>
+              {overview.netWorthCents !== null ? (
+                <Money
+                  cents={overview.netWorthCents}
+                  className={cn(
+                    "shrink-0 text-num-lg",
+                    overview.netWorthCents < 0 ? "text-danger" : "text-ink",
+                  )}
+                />
+              ) : (
+                <span className="shrink-0 text-num text-ink-faint">Unknown</span>
+              )}
+              <ChevronRightIcon className="h-4.5 w-4.5 shrink-0 text-ink-faint" />
+            </button>
+          </Card>
+
           {/* actions */}
           <div className="flex flex-wrap gap-2">
             <Button size="sm" onClick={() => { setAddAccountOpen(true); setSheetNonce((n) => n + 1); }}>
@@ -136,7 +196,7 @@ function MoreRoute() {
               <DownloadIcon className="h-4 w-4" />
               Export
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setView({ kind: "transactions", accountId: ALL_ACCOUNTS })}>
+            <Button variant="ghost" size="sm" onClick={() => setViewAndSearch({ kind: "transactions", accountId: ALL_ACCOUNTS })}>
               All transactions
             </Button>
           </div>
@@ -173,48 +233,54 @@ function MoreRoute() {
                 <AccountCard
                   key={account.id}
                   account={account}
-                  onOpen={() => setView({ kind: "transactions", accountId: account.id })}
+                  onOpen={() => setViewAndSearch({ kind: "transactions", accountId: account.id })}
                 />
               ))}
             </div>
           )}
 
           {/* quick view for the first account's balance */}
-          {demoAccount && demoAccount.availableBalanceCents !== null ? (
-            <Card className="border-brand-200/60 bg-brand-50/60 dark:bg-brand-100/20">
-              <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
-                Quick check
-              </p>
-              <p className="mt-1.5 text-body-sm text-ink-muted">
-                {demoAccount.name} has{" "}
-                <Money cents={demoAccount.availableBalanceCents} className="font-semibold text-ink" />{" "}
-                available ({formatDollars(demoAccount.availableBalanceCents)}). Plans deduct bills,
-                essentials, goals, giving, and your buffer from this — see Home for the full
-                breakdown.
-              </p>
-            </Card>
-          ) : null}
+          {(() => {
+            const demoAccount = household.accounts[0];
+            return demoAccount && demoAccount.availableBalanceCents !== null ? (
+              <Card className="border-brand-200/60 bg-brand-50/60 dark:bg-brand-100/20">
+                <p className="text-caption font-semibold uppercase tracking-[0.08em] text-ink-faint">
+                  Quick check
+                </p>
+                <p className="mt-1.5 text-body-sm text-ink-muted">
+                  {demoAccount.name} has{" "}
+                  <Money cents={demoAccount.availableBalanceCents} className="font-semibold text-ink" />{" "}
+                  available ({formatCents(demoAccount.availableBalanceCents)}). Plans deduct bills,
+                  essentials, goals, giving, and your buffer from this — see Home for the full
+                  breakdown.
+                </p>
+              </Card>
+            ) : null;
+          })()}
 
           {/* the rest of More */}
-          <MoreSections onOpen={(section) => setView({ kind: "section", section })} />
-
-          <p className="text-caption text-ink-faint">
-            Prototype only — not a financial service. No bank connections, no real money, no credit
-            pulls. Data lives on this device.
-          </p>
+          <MoreSections onOpen={(section) => setViewAndSearch({ kind: "section", section })} />
         </div>
+      ) : view.kind === "overview" ? (
+        <OverviewView
+          household={household}
+          onBack={() => setViewAndSearch({ kind: "accounts" })}
+          onOpenAccount={(accountId) =>
+            setViewAndSearch({ kind: "transactions", accountId })
+          }
+        />
       ) : view.kind === "section" ? (
         <SectionView
           section={view.section}
           household={household}
-          onBack={() => setView({ kind: "accounts" })}
+          onBack={() => setViewAndSearch({ kind: "accounts" })}
         />
       ) : (
         <TransactionsView
           household={household}
           selectedAccountId={view.accountId}
-          onSelectAccount={(accountId) => setView({ kind: "transactions", accountId })}
-          onBack={() => setView({ kind: "accounts" })}
+          onSelectAccount={(accountId) => setViewAndSearch({ kind: "transactions", accountId })}
+          onBack={() => setViewAndSearch({ kind: "accounts" })}
           onAddTransaction={() => openAddTxn(view.accountId === ALL_ACCOUNTS ? null : view.accountId)}
         />
       )}

@@ -1,10 +1,11 @@
-import { useMemo, useState } from "react";
-import { Link, Navigate, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Link, Navigate, createFileRoute, useLocation, useNavigate } from "@tanstack/react-router";
 import { Banner } from "~/components/Banner";
 import { Button, buttonClass } from "~/components/Button";
 import { Card } from "~/components/Card";
 import { LoadingState } from "~/components/LoadingState";
 import { Money } from "~/components/Money";
+import { Expandable } from "~/components/Expandable";
 import { Sheet } from "~/components/Dialog";
 import { Select } from "~/components/Select";
 import { Switch } from "~/components/Switch";
@@ -12,7 +13,7 @@ import { TextField } from "~/components/TextField";
 import { DonutChart } from "~/components/charts";
 import { PlanIcon, WarningIcon } from "~/components/icons";
 import { useClientData } from "~/lib/client/store";
-import { todayISO, formatCycleRange, formatWeekdayMonthDay, formatPayoffDateLabel } from "~/lib/client/dates";
+import { todayISO, formatCycleRange, formatMonthDay, formatWeekdayMonthDay, formatPayoffDateLabel } from "~/lib/client/dates";
 import { buildHomePlan } from "~/lib/client/plan";
 import {
   automationRuleViews,
@@ -34,14 +35,6 @@ export const Route = createFileRoute("/_app/plan")({
 
 /* ------------------------------------------------------- shared bits --- */
 
-function SourceChip({ label }: { label: string }) {
-  return (
-    <span className="rounded-pill border border-warning/40 bg-warning-soft px-2.5 py-1 text-caption font-semibold text-warning">
-      {label}
-    </span>
-  );
-}
-
 function EstimateChip() {
   return (
     <span className="rounded-pill border border-line-strong bg-surface-sunken px-2 py-0.5 text-caption text-ink-muted">
@@ -60,7 +53,7 @@ function SectionHeading({
   note?: string;
 }) {
   return (
-    <div className="mt-2 flex items-start gap-3">
+    <div className="flex items-start gap-3">
       <span
         aria-hidden="true"
         className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-brand-100 text-caption font-bold text-brand-800 dark:bg-brand-100/40 dark:text-brand-900"
@@ -72,6 +65,48 @@ function SectionHeading({
         {note ? <p className="mt-0.5 text-caption text-ink-muted">{note}</p> : null}
       </div>
     </div>
+  );
+}
+
+/** Section jump nav — each section is a compact summary card; this keeps
+ *  Giving and Automation reachable without scrolling past every debt row. */
+const PLAN_SECTIONS = [
+  { id: "bills", label: "Bills" },
+  { id: "debt", label: "Debt" },
+  { id: "goals", label: "Goals" },
+  { id: "giving", label: "Giving" },
+  { id: "automation", label: "Automation" },
+] as const;
+
+function SectionNav() {
+  const scrollTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  };
+  return (
+    <nav
+      aria-label="Plan sections"
+      className="sticky top-14 z-20 -mx-4 border-b border-line bg-surface/90 px-4 py-2 backdrop-blur sm:top-16 lg:mx-0 lg:rounded-control lg:border lg:px-2 lg:py-1.5 lg:bg-surface-raised"
+    >
+      <div className="flex gap-1 overflow-x-auto">
+        {PLAN_SECTIONS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => scrollTo(s.id)}
+            className="shrink-0 rounded-pill px-3 py-1.5 text-caption font-semibold text-ink-muted transition-colors hover:bg-surface-sunken hover:text-ink"
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }
 
@@ -87,61 +122,67 @@ function BillsSection({ household }: { household: Household }) {
       ? formatCycleRange(view.windowStart, view.windowEnd)
       : "this cycle";
   return (
-    <section aria-labelledby="plan-bills">
+    <section id="bills" aria-labelledby="plan-bills" className="scroll-mt-24">
       <SectionHeading
         step="1"
         title="Bills & obligations"
-        note={`Bills due in this pay cycle (${cycleLabel})`}
+        note={`Due in this pay cycle (${cycleLabel})`}
       />
       <Card className="mt-3">
-        <ul className="divide-y divide-line-faint">
-          {view.obligations.map((o) => (
-            <li key={o.id} className="flex items-start justify-between gap-4 py-3">
-              <div className="min-w-0">
-                <p className="text-body font-medium text-ink">{o.name}</p>
-                <p className="mt-0.5 text-caption text-ink-muted">
-                  Due day {o.dueDay ?? "—"} · {o.cadence}
-                  {o.essential ? " · essential" : ""}
-                  {o.alreadyReflected ? " · already reflected in your balance" : ""}
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <Money cents={o.amountCents} className="text-num text-ink" />
-                {o.alreadyReflected ? (
-                  <span className="rounded-pill border border-line-strong bg-surface-sunken px-2 py-0.5 text-caption text-ink-muted">
-                    in balance — not re-deducted
-                  </span>
-                ) : (
-                  <span className="text-caption text-ink-faint">deducted once</span>
-                )}
-              </div>
-            </li>
-          ))}
-          {view.obligations.length === 0 ? (
-            <li className="py-6 text-center text-body-sm text-ink-muted">
-              No bills are scheduled inside this pay cycle.
-            </li>
-          ) : null}
-        </ul>
-        <div className="mt-2 border-t border-line pt-3">
-          <div className="flex items-baseline justify-between gap-4">
-            <p className="text-body-sm font-semibold text-ink">Cycle total</p>
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="text-h4 text-ink">
+              {view.obligations.length}{" "}
+              {view.obligations.length === 1 ? "bill" : "bills"} this cycle
+            </p>
+            <p className="mt-0.5 text-caption text-ink-muted">
+              {view.reflectedCount > 0
+                ? `${formatDollars(view.reflectedCents)} already inside your balance — shown, never deducted again. Only ${formatDollars(
+                    view.deductedCents,
+                  )} is committed out of this cycle's plan.`
+                : "Every bill is committed exactly once against this cycle's plan."}
+            </p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-caption text-ink-muted">Cycle total</p>
             <Money cents={view.totalCents} className="text-num-lg text-ink" />
           </div>
-          <p className="mt-1 text-caption leading-relaxed text-ink-muted">
-            {view.reflectedCount > 0
-              ? `${formatDollars(view.reflectedCents)} is already inside your available balance — it is shown above and never deducted again. Only ${formatDollars(
-                  view.deductedCents,
-                )} is committed out of this cycle's plan.`
-              : `All ${view.obligations.length} bills are committed once against this cycle's plan.`}
-          </p>
-          <Link
-            to="/setup"
-            className={buttonClass("secondary", "sm", "mt-3")}
-          >
-            Edit assumptions
-          </Link>
         </div>
+        <Expandable
+          id="bills-detail"
+          summary={`View ${view.obligations.length} bills`}
+          details="Names, due days, amounts, and which are already in your balance"
+          className="mt-3"
+        >
+          <ul className="divide-y divide-line-faint">
+            {view.obligations.map((o) => (
+              <li key={o.id} className="flex items-start justify-between gap-4 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-body-sm font-medium text-ink">{o.name}</p>
+                  <p className="text-caption text-ink-muted">
+                    Due day {o.dueDay ?? "—"} · {o.cadence}
+                    {o.essential ? " · essential" : ""}
+                    {o.alreadyReflected ? " · already reflected in your balance" : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-0.5">
+                  <Money cents={o.amountCents} className="text-num text-ink" />
+                  <span className="text-caption text-ink-faint">
+                    {o.alreadyReflected ? "in balance — not re-deducted" : "deducted once"}
+                  </span>
+                </div>
+              </li>
+            ))}
+            {view.obligations.length === 0 ? (
+              <li className="py-4 text-center text-body-sm text-ink-muted">
+                No bills are scheduled inside this pay cycle.
+              </li>
+            ) : null}
+          </ul>
+          <Link to="/setup" className={buttonClass("secondary", "sm", "mt-3")}>
+            Edit plan
+          </Link>
+        </Expandable>
       </Card>
     </section>
   );
@@ -170,7 +211,7 @@ function MinimumsThisCycle({ household }: { household: Household }) {
                 <span className="text-caption text-ink-muted">
                   {" "}
                   {row.status === "inWindow"
-                    ? `— due ${row.dueDate}`
+                    ? `— due ${formatMonthDay(row.dueDate!)}`
                     : row.status === "noDueDate"
                       ? "— due date unknown"
                       : row.status === "paidOnRecord"
@@ -218,6 +259,8 @@ function MinimumsThisCycle({ household }: { household: Household }) {
 
 /* --------------------------------------------------- 2. debt strategies */
 
+type StrategyKey = "avalanche" | "snowball";
+
 function DebtSection({ household }: { household: Household }) {
   const today = todayISO();
   const { setDebtExtraBudget, setAdoptedDebtExtra } = useClientData();
@@ -237,7 +280,7 @@ function DebtSection({ household }: { household: Household }) {
 
   if (household.debts.length === 0) {
     return (
-      <section aria-labelledby="plan-debt">
+      <section id="debt" aria-labelledby="plan-debt" className="scroll-mt-24">
         <SectionHeading step="2" title="Debt strategies" />
         <Card className="mt-3">
           <p className="text-body font-medium text-ink">No debts on record</p>
@@ -253,37 +296,139 @@ function DebtSection({ household }: { household: Household }) {
 
   const { comparison: c, extraBudgetCents, minimumsCents, monthlyTotalCents } = view;
   const strategies: Array<{
-    key: "avalanche" | "snowball";
+    key: StrategyKey;
     title: string;
     subtitle: string;
     result: (typeof c)["avalanche"];
   }> = [
-    {
-      key: "avalanche",
-      title: "Avalanche",
-      subtitle: "Highest APR first",
-      result: c.avalanche,
-    },
-    {
-      key: "snowball",
-      title: "Snowball",
-      subtitle: "Smallest balance first",
-      result: c.snowball,
-    },
+    { key: "avalanche", title: "Avalanche", subtitle: "Highest APR first", result: c.avalanche },
+    { key: "snowball", title: "Snowball", subtitle: "Smallest balance first", result: c.snowball },
   ];
 
   return (
-    <section aria-labelledby="plan-debt">
+    <section id="debt" aria-labelledby="plan-debt" className="scroll-mt-24">
       <SectionHeading
         step="2"
         title="Debt strategies"
-        note={`Both scenarios keep every minimum payment and add the same extra budget. Payoff dates and interest are ESTIMATES — today's balances, rates, and minimums held constant.`}
+        note={`Both scenarios keep every minimum and add the same extra budget. Payoff dates and interest are ESTIMATES — today's balances, rates, and minimums held constant.`}
       />
       <Card className="mt-3">
-        <div className="rounded-control border border-brand-200/60 bg-brand-50/50 p-3.5 dark:bg-brand-100/10">
+        {/* summary comparison FIRST (Finding 8) */}
+        <div className="grid gap-3 lg:grid-cols-2">
+          {strategies.map((s) => {
+            const r = s.result;
+            return (
+              <div
+                key={s.key}
+                className={cn(
+                  "rounded-card border p-4",
+                  s.key === "avalanche"
+                    ? "border-brand-200/70 bg-brand-50/50 dark:bg-brand-100/10"
+                    : "border-line bg-surface-sunken/60",
+                )}
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <div>
+                    <h3 className="text-h3 text-ink">{s.title}</h3>
+                    <p className="text-caption text-ink-muted">{s.subtitle}</p>
+                  </div>
+                  <EstimateChip />
+                </div>
+                <dl className="mt-3 flex flex-col gap-1.5 text-body-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-ink-muted">Total interest (estimate)</dt>
+                    <dd className="text-right text-num text-ink">
+                      {r.totalInterestCents === null ? (
+                        <>
+                          <span className="text-ink-muted">Incomplete</span> —{" "}
+                          <Money cents={r.totalInterestKnownCents} /> known
+                        </>
+                      ) : (
+                        <Money cents={r.totalInterestCents} />
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-ink-muted">Debt-free by (estimate)</dt>
+                    <dd className="text-right text-num text-ink">
+                      {r.lastPayoffDate
+                        ? formatPayoffDateLabel(r.lastPayoffMonth, r.lastPayoffDate)
+                        : "Beyond the modeled horizon"}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <dt className="text-ink-muted">Monthly commitment</dt>
+                    <dd className="text-right text-num text-ink">
+                      <Money cents={monthlyTotalCents} />
+                    </dd>
+                  </div>
+                </dl>
+                {r.totalInterestCents === null ? (
+                  <p className="mt-2 rounded-control bg-warning-soft px-2.5 py-1.5 text-caption text-warning">
+                    Some rates are unknown — interest totals are incomplete and
+                    never invented.
+                  </p>
+                ) : null}
+                <Expandable
+                  id={`debt-schedules-${s.key}`}
+                  summary="Payoff schedules"
+                  details="Per-debt projected payoff dates and interest"
+                  className="mt-3"
+                >
+                  <div className="space-y-3">
+                    {DEBT_GROUP_ORDER.map((group) => {
+                      const rows = r.payoffRows.filter((row) => debtGroupName(row) === group);
+                      if (rows.length === 0) return null;
+                      return (
+                        <div key={group}>
+                          <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
+                            {group}
+                          </p>
+                          <ul className="mt-1 divide-y divide-line-faint">
+                            {rows.map((row) => (
+                              <li key={row.debtId} className="flex items-start justify-between gap-3 py-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-body-sm font-medium text-ink">
+                                    {row.name}
+                                  </p>
+                                  <p className="text-caption text-ink-muted">
+                                    {row.aprBps === null ? (
+                                      <span className="font-medium text-warning">Rate unknown</span>
+                                    ) : (
+                                      `${formatBpsAsPercent(row.aprBps)} APR (${row.aprKind})`
+                                    )}
+                                  </p>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className="text-body-sm font-medium text-ink">
+                                    {row.payoffDate
+                                      ? formatPayoffDateLabel(row.payoffMonth, row.payoffDate)
+                                      : "—"}
+                                  </p>
+                                  <p className="text-caption text-ink-muted">
+                                    {row.interestCents === null
+                                      ? "interest: not shown"
+                                      : `interest ${formatCents(row.interestCents)}`}
+                                  </p>
+                                </div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Expandable>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* what-if controls — drive the comparison; never adopted implicitly */}
+        <div className="mt-4 rounded-control border border-brand-200/60 bg-brand-50/50 p-3.5 dark:bg-brand-100/10">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
-              What-if scenario — not included in your current plan
+              What-if scenario — not included in your Home plan
             </p>
             {view.whatIfMatchesAdopted ? (
               <span className="rounded-pill border border-success/40 bg-success-soft px-2 py-0.5 text-caption font-semibold text-success">
@@ -291,8 +436,7 @@ function DebtSection({ household }: { household: Household }) {
               </span>
             ) : view.adoptedExtraCents > 0 ? (
               <span className="rounded-pill border border-line-strong bg-surface-sunken px-2 py-0.5 text-caption font-medium text-ink-muted">
-                adopted: {formatDollars(view.adoptedExtraCents)}/mo — a
-                different amount
+                adopted: {formatDollars(view.adoptedExtraCents)}/mo — a different amount
               </span>
             ) : null}
           </div>
@@ -305,7 +449,7 @@ function DebtSection({ household }: { household: Household }) {
                 numeric
                 value={draft}
                 onChange={setDraft}
-                hint="Feeds the two scenarios below. A scenario is a projection — nothing moves and nothing is deducted from your plan until you adopt it."
+                hint="Feeds the two scenarios above. A scenario is a projection — nothing moves and nothing is deducted from your plan until you adopt it."
               />
             </div>
             <div className="rounded-control border border-line-strong bg-surface-sunken px-3.5 py-3">
@@ -353,103 +497,6 @@ function DebtSection({ household }: { household: Household }) {
 
         <MinimumsThisCycle household={household} />
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          {strategies.map((s) => {
-            const r = s.result;
-            const groups = DEBT_GROUP_ORDER.map((group) => ({
-              group,
-              rows: r.payoffRows.filter((row) => debtGroupName(row) === group),
-            })).filter((g) => g.rows.length > 0);
-            return (
-              <div
-                key={s.key}
-                className={cn(
-                  "rounded-card border p-4",
-                  s.key === "avalanche"
-                    ? "border-brand-200/70 bg-brand-50/50 dark:bg-brand-100/10"
-                    : "border-line bg-surface-sunken/60",
-                )}
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <div>
-                    <h3 className="text-h3 text-ink">{s.title}</h3>
-                    <p className="text-caption text-ink-muted">{s.subtitle}</p>
-                  </div>
-                  <EstimateChip />
-                </div>
-                <dl className="mt-3 flex flex-col gap-1.5 text-body-sm">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="text-ink-muted">Total interest (estimate)</dt>
-                    <dd className="text-right text-num text-ink">
-                      {r.totalInterestCents === null ? (
-                        <>
-                          <span className="text-ink-muted">Incomplete</span> —{" "}
-                          <Money cents={r.totalInterestKnownCents} /> known
-                        </>
-                      ) : (
-                        <Money cents={r.totalInterestCents} />
-                      )}
-                    </dd>
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3">
-                    <dt className="text-ink-muted">Debt-free by (estimate)</dt>
-                    <dd className="text-right text-num text-ink">
-                      {r.lastPayoffDate
-                        ? formatPayoffDateLabel(r.lastPayoffMonth, r.lastPayoffDate)
-                        : "Beyond the modeled horizon"}
-                    </dd>
-                  </div>
-                </dl>
-                {r.totalInterestCents === null ? (
-                  <p className="mt-2 rounded-control bg-warning-soft px-2.5 py-1.5 text-caption text-warning">
-                    Some rates are unknown — interest totals are incomplete and
-                    never invented.
-                  </p>
-                ) : null}
-                <div className="mt-3 space-y-3">
-                  {groups.map(({ group, rows }) => (
-                    <div key={group}>
-                      <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
-                        {group}
-                      </p>
-                      <ul className="mt-1 divide-y divide-line-faint">
-                        {rows.map((row) => (
-                          <li key={row.debtId} className="flex items-start justify-between gap-3 py-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-body-sm font-medium text-ink">
-                                {row.name}
-                              </p>
-                              <p className="text-caption text-ink-muted">
-                                {row.aprBps === null ? (
-                                  <span className="font-medium text-warning">Rate unknown</span>
-                                ) : (
-                                  `${formatBpsAsPercent(row.aprBps)} APR (${row.aprKind})`
-                                )}
-                              </p>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <p className="text-caption text-ink-muted">Projected payoff</p>
-                              <p className="text-body-sm font-medium text-ink">
-                                {row.payoffDate
-                                  ? formatPayoffDateLabel(row.payoffMonth, row.payoffDate)
-                                  : "—"}
-                              </p>
-                              <p className="text-caption text-ink-muted">
-                                {row.interestCents === null
-                                  ? "interest: not shown"
-                                  : `interest ${formatCents(row.interestCents)}`}
-                              </p>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
         <ul className="mt-4 flex flex-col gap-1">
           {c.avalanche.estimateNotes.map((n) => (
             <li key={n} className="text-caption leading-relaxed text-ink-muted">
@@ -479,7 +526,7 @@ function GoalsSection({ household }: { household: Household }) {
 
   if (views.length === 0) {
     return (
-      <section aria-labelledby="plan-goals">
+      <section id="goals" aria-labelledby="plan-goals" className="scroll-mt-24">
         <SectionHeading step="3" title="Savings goals" />
         <Card className="mt-3">
           <p className="text-body font-medium text-ink">No savings goals yet</p>
@@ -492,7 +539,7 @@ function GoalsSection({ household }: { household: Household }) {
   }
 
   return (
-    <section aria-labelledby="plan-goals">
+    <section id="goals" aria-labelledby="plan-goals" className="scroll-mt-24">
       <SectionHeading
         step="3"
         title="Savings goals"
@@ -507,30 +554,23 @@ function GoalsSection({ household }: { household: Household }) {
                 <DonutChart
                   value={g.currentSavedCents}
                   max={g.targetCents}
-                  size={92}
+                  size={84}
                   thickness={9}
                   ariaLabel={`${g.goal.name}: ${formatDollars(g.currentSavedCents)} of ${formatDollars(
                     g.targetCents,
                   )} saved`}
                 >
-                  <span className="text-caption font-semibold text-ink">
-                    {pct}%
-                  </span>
+                  <span className="text-caption font-semibold text-ink">{pct}%</span>
                 </DonutChart>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h3 className="text-h4 text-ink">{g.goal.name}</h3>
                       <p className="mt-0.5 text-caption text-ink-muted">
-                        {g.goal.kind === "emergencyFund"
-                          ? "Emergency fund"
-                          : "Custom goal"}{" "}
-                        · priority {g.goal.priority}
+                        {g.goal.kind === "emergencyFund" ? "Emergency fund" : "Custom goal"} · priority{" "}
+                        {g.goal.priority}
                       </p>
                     </div>
-                    <label className="sr-only" htmlFor={`goal-prio-${g.goal.id}`}>
-                      Priority for {g.goal.name}
-                    </label>
                     <Select
                       id={`goal-prio-${g.goal.id}`}
                       label={""}
@@ -539,7 +579,7 @@ function GoalsSection({ household }: { household: Household }) {
                       onChange={(e) =>
                         setGoalPriority(g.goal.id, Number(e.target.value))
                       }
-                      className="w-24 shrink-0"
+                      className="w-20 shrink-0"
                     >
                       {views.map((_, i) => (
                         <option key={i + 1} value={i + 1}>
@@ -565,14 +605,43 @@ function GoalsSection({ household }: { household: Household }) {
                   </p>
                 </div>
               </div>
+              <Expandable
+                id={`goal-history-${g.goal.id}`}
+                summary="Details & contribution history"
+                details="Confirmed, dated contributions — kept separate from projections"
+                className="mt-3"
+              >
+                {g.confirmedHistory.length > 0 ? (
+                  <ul className="divide-y divide-line-faint">
+                    {g.confirmedHistory.map((p) => (
+                      <li key={p.date} className="flex items-baseline justify-between gap-3 py-1.5">
+                        <span className="text-body-sm text-ink-muted">
+                          {formatWeekdayMonthDay(p.date)}
+                        </span>
+                        <span className="shrink-0 text-caption text-ink-muted">
+                          <Money cents={p.contributionCents} className="font-semibold text-ink" />{" "}
+                          · total <Money cents={p.runningTotalCents} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-body-sm text-ink-muted">
+                    No confirmed contributions on record yet.
+                  </p>
+                )}
+                {g.projected.length > 0 ? (
+                  <p className="mt-2 border-t border-line-faint pt-2 text-caption leading-relaxed text-ink-muted">
+                    Projected: <Money cents={g.projectedTotalCents} /> planned for
+                    upcoming cycles — not saved yet, and never merged into
+                    confirmed history.
+                  </p>
+                ) : null}
+              </Expandable>
             </Card>
           );
         })}
       </div>
-      <p className="mt-2 text-caption text-ink-faint">
-        Dated, confirmed contribution history and projections live on the
-        Progress tab — kept strictly separate.
-      </p>
     </section>
   );
 }
@@ -633,11 +702,7 @@ function GivingSection({ household }: { household: Household }) {
   const skipped = view.skipped;
 
   return (
-    <section
-      id="giving"
-      aria-labelledby="plan-giving"
-      className="scroll-mt-24"
-    >
+    <section id="giving" aria-labelledby="plan-giving" className="scroll-mt-24">
       <SectionHeading
         step="4"
         title="Giving (optional)"
@@ -796,7 +861,7 @@ function AutomationSection({ household }: { household: Household }) {
   const allPaused = views.length > 0 && views.every((v) => v.paused);
 
   return (
-    <section aria-labelledby="plan-automation">
+    <section id="automation" aria-labelledby="plan-automation" className="scroll-mt-24">
       <SectionHeading
         step="5"
         title="Automation (simulated only)"
@@ -813,7 +878,7 @@ function AutomationSection({ household }: { household: Household }) {
             </p>
           </div>
           <Button
-            variant={allPaused ? "secondary" : "secondary"}
+            variant="secondary"
             size="sm"
             onClick={() => setAllRulesPaused(!allPaused)}
             aria-pressed={allPaused}
@@ -856,8 +921,7 @@ function AutomationSection({ household }: { household: Household }) {
                       </span>
                     </div>
                     <p className="mt-0.5 text-caption text-ink-muted">
-                      {v.scheduleLabel} · cap{" "}
-                      <Money cents={v.maxCents} /> per trigger · simulated
+                      {v.scheduleLabel} · cap <Money cents={v.maxCents} /> per trigger · simulated
                     </p>
                   </div>
                   <Button
@@ -871,25 +935,37 @@ function AutomationSection({ household }: { household: Household }) {
                   </Button>
                 </div>
 
-                {v.paused ? (
-                  <p className="mt-3 rounded-control bg-surface-sunken px-3 py-2 text-caption text-ink-muted">
-                    Paused — this preview is inactive and nothing would move.
-                  </p>
-                ) : v.stale ? (
+                {/* Critical warnings are NEVER hidden in collapsed content. */}
+                {!v.paused && v.stale ? (
                   <p className="mt-3 rounded-control bg-warning-soft px-3 py-2 text-caption text-warning">
                     The modeled trigger date for this household has already
                     passed — the preview is not shown for out-of-date data.
                   </p>
-                ) : v.unresolved ? (
+                ) : null}
+                {!v.paused && !v.stale && v.unresolved ? (
                   <p className="mt-3 rounded-control bg-warning-soft px-3 py-2 text-caption text-warning">
                     {v.unresolved}
                   </p>
+                ) : null}
+                {!v.paused && !v.stale && v.sufficient === false ? (
+                  <p className="mt-3 rounded-control bg-warning-soft px-3 py-2 text-caption font-medium text-warning">
+                    Funds would be insufficient on the trigger day — this rule
+                    would pause rather than overdraw.
+                  </p>
+                ) : null}
+
+                {v.paused ? (
+                  <p className="mt-3 rounded-control bg-surface-sunken px-3 py-2 text-caption text-ink-muted">
+                    Paused — this preview is inactive and nothing would move.
+                  </p>
                 ) : (
-                  <div className="mt-3 rounded-control border border-line-faint bg-surface-sunken/60 p-3">
-                    <p className="text-caption font-semibold uppercase tracking-[0.06em] text-ink-faint">
-                      Preview (simulated — nothing moves)
-                    </p>
-                    <dl className="mt-2 flex flex-col gap-1.5 text-body-sm">
+                  <Expandable
+                    id={`rule-preview-${v.rule.id}`}
+                    summary="Preview (simulated — nothing moves)"
+                    details={v.triggerDate ? `Next trigger · ${formatWeekdayMonthDay(v.triggerDate)}` : v.triggerLabel}
+                    className="mt-3"
+                  >
+                    <dl className="flex flex-col gap-1.5 text-body-sm">
                       <div className="flex items-baseline justify-between gap-3">
                         <dt className="text-ink-muted">Would move</dt>
                         <dd className="text-num text-ink">
@@ -932,12 +1008,6 @@ function AutomationSection({ household }: { household: Household }) {
                         </dd>
                       </div>
                     </dl>
-                    {v.sufficient === false ? (
-                      <p className="mt-2 rounded-control bg-warning-soft px-2.5 py-1.5 text-caption font-medium text-warning">
-                        Funds insufficient on the trigger day — this rule would
-                        pause rather than overdraw.
-                      </p>
-                    ) : null}
                     {v.incomeUncertain ? (
                       <p className="mt-2 flex items-start gap-1.5 text-caption text-ink-muted">
                         <WarningIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -945,16 +1015,12 @@ function AutomationSection({ household }: { household: Household }) {
                         an estimate, never an authorization to move money.
                       </p>
                     ) : null}
-                  </div>
+                  </Expandable>
                 )}
               </li>
             ))}
           </ul>
         )}
-        <p className="mt-4 border-t border-line-faint pt-2.5 text-caption leading-relaxed text-ink-muted">
-          Rules are data in this prototype: no processor is connected, no
-          transfer is ever submitted, and "preview" never equals "paid".
-        </p>
       </Card>
     </section>
   );
@@ -962,9 +1028,26 @@ function AutomationSection({ household }: { household: Household }) {
 
 /* ------------------------------------------------------------ the route */
 
+function useScrollToHash() {
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    const id = hash.replace(/^#/, "");
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  }, [hash]);
+}
+
 function PlanRoute() {
   const { status, onboarded, household, startOver } = useClientData();
   const navigate = useNavigate();
+  useScrollToHash();
 
   if (status !== "ready") return <LoadingState label="Loading your plan…" />;
   if (!onboarded || !household) return <Navigate to="/" replace />;
@@ -977,23 +1060,13 @@ function PlanRoute() {
     <div className="flex flex-col gap-6 pb-6">
       <header>
         <div className="flex items-center justify-between gap-3">
-          <SourceChip
-            label={
-              household.source === "demo"
-                ? "Synthetic demo data"
-                : "Your numbers · saved on this device"
-            }
-          />
-          <Link
-            to="/setup"
-            className="rounded-pill border border-line-strong bg-surface-raised px-3 py-1.5 text-caption font-medium text-ink-muted transition-colors hover:border-brand-600 hover:text-brand-700 dark:hover:text-brand-500"
-          >
-            Edit assumptions
+          <div className="flex items-center gap-2.5">
+            <PlanIcon className="h-6 w-6 text-brand-700 dark:text-brand-900" />
+            <h1 className="text-h1 text-ink">Plan</h1>
+          </div>
+          <Link to="/setup" className={buttonClass("secondary", "sm")}>
+            Edit plan
           </Link>
-        </div>
-        <div className="mt-2 flex items-center gap-2.5">
-          <PlanIcon className="h-6 w-6 text-brand-700 dark:text-brand-900" />
-          <h1 className="text-h1 text-ink">Plan</h1>
         </div>
         <p className="mt-1 text-body-sm text-ink-muted">
           What's committed this cycle — and what could change. Every number is
@@ -1009,6 +1082,8 @@ function PlanRoute() {
         />
       ) : null}
 
+      <SectionNav />
+
       <BillsSection household={household} />
       <DebtSection household={household} />
       <GoalsSection household={household} />
@@ -1017,8 +1092,7 @@ function PlanRoute() {
 
       <div className="mt-1 flex items-center justify-between gap-3 border-t border-line pt-4">
         <p className="text-caption text-ink-faint">
-          Prototype only — not a financial service. Don't want this data saved
-          on this device?
+          Don't want this data saved on this device?
         </p>
         <Button
           variant="ghost"

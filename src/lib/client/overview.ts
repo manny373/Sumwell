@@ -26,8 +26,9 @@
  *
  * All money stays integer cents; `null` means unknown.
  */
-import type { Account, Debt } from "~/lib/finance/types";
+import type { Account } from "~/lib/finance/types";
 import { isCreditAccount, isInvestmentAccount } from "~/lib/accounts/accounts";
+import { formatCents } from "~/lib/money";
 import type { Household } from "./types";
 
 export interface MoneyLine {
@@ -91,8 +92,6 @@ function sumOrUnknown(centsList: Array<number | null>): number | null {
 }
 
 /** Assets that are spendable cash vs investable (not spendable) cash. */
-const CASH_TYPES = new Set<Account["type"]>(["checking", "savings", "manualAsset"]);
-
 function ownedBalance(account: Account): number | null {
   return account.currentBalanceCents ?? account.availableBalanceCents;
 }
@@ -119,12 +118,19 @@ export function allYourMoneyView(household: Household): AllYourMoneyView {
     const group = isInvestmentAccount(account) ? investableLines : cashLines;
     const cents = ownedBalance(account);
     if (cents === null || cents === undefined) {
-      unknownAccounts.push({ accountId: account.id, name: account.name });
+      unknownAccounts.push({ accountId: account.id, name: account.name, cents: null });
       group.push({ accountId: account.id, name: account.name, cents: null });
     } else if (cents >= 0) {
       // Owned accounts are positive by convention; negative balances here are
       // a data anomaly — keep them visible rather than silently dropping them.
-      group.push({ accountId: account.id, name: account.name, cents });
+      const availableNote =
+        account.type === "checking" &&
+        account.availableBalanceCents !== null &&
+        account.availableBalanceCents !== undefined &&
+        account.availableBalanceCents !== account.currentBalanceCents
+          ? `Available today: ${formatCents(account.availableBalanceCents)}`
+          : undefined;
+      group.push({ accountId: account.id, name: account.name, cents, note: availableNote });
     } else {
       group.push({
         accountId: account.id,
@@ -137,14 +143,14 @@ export function allYourMoneyView(household: Household): AllYourMoneyView {
 
   const assetGroups: AssetGroup[] = [
     {
-      id: "cash",
+      id: "cash" as const,
       label: "Cash",
       note: "Money you can move today — checking, savings, and manual assets.",
       lines: cashLines,
       totalCents: sumOrUnknown(cashLines.map((l) => l.cents)),
     },
     {
-      id: "investable",
+      id: "investable" as const,
       label: "Investments",
       note: "Brokerage and retirement — real money, but NOT spendable cash.",
       lines: investableLines,

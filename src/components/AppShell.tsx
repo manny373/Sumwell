@@ -1,8 +1,10 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "@tanstack/react-router";
 import { cn } from "~/lib/cn";
 import { Logo } from "~/components/Logo";
 import { ThemeToggle } from "~/components/theme";
+import { AboutDemoSheet } from "~/components/AboutDemoSheet";
+import { useClientData } from "~/lib/client/store";
 import {
   HomeIcon,
   MoreIcon,
@@ -19,11 +21,24 @@ const TABS = [
 
 export type TabId = (typeof TABS)[number]["id"];
 
-function DemoChip() {
+/**
+ * The ONE persistent demo/data indicator (Finding 9). Shows "Demo data" for
+ * the synthetic household, "Your data" for manual numbers, and opens the
+ * "About this demo" sheet where every repeated explanation lives. Screens do
+ * NOT repeat the demo warnings themselves.
+ */
+function DataChip({ onOpen }: { onOpen: () => void }) {
+  const { household } = useClientData();
+  const demo = household?.source === "demo";
   return (
-    <span className="rounded-pill border border-warning/40 bg-warning-soft px-2.5 py-1 text-caption font-semibold text-warning">
-      Prototype
-    </span>
+    <button
+      type="button"
+      onClick={onOpen}
+      className="inline-flex items-center gap-1.5 rounded-pill border border-warning/40 bg-warning-soft px-2.5 py-1 text-caption font-semibold text-warning transition-colors hover:border-warning/60 hover:bg-warning-soft/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/40"
+    >
+      {demo ? "Demo data" : "Your data"}
+      <span className="underline decoration-warning/50 underline-offset-2">about</span>
+    </button>
   );
 }
 
@@ -62,14 +77,14 @@ function BottomNav() {
   );
 }
 
-function Sidebar() {
+function Sidebar({ onOpenAbout }: { onOpenAbout: () => void }) {
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-line bg-surface-raised px-3 py-5 lg:flex">
       <div className="flex items-center justify-between gap-2 px-1.5">
         <Link to="/" aria-label="Sumwell home">
           <Logo />
         </Link>
-        <DemoChip />
+        <DataChip onOpen={onOpenAbout} />
       </div>
       <nav aria-label="Primary" className="mt-9 flex flex-col gap-1">
         {TABS.map((tab) => (
@@ -93,27 +108,28 @@ function Sidebar() {
       </nav>
       <div className="mt-auto flex flex-col gap-3 border-t border-line pt-4">
         <div className="flex items-center justify-between px-1.5">
-          <span className="text-caption font-semibold text-ink-faint">
-            Prototype
-          </span>
+          <button
+            type="button"
+            onClick={onOpenAbout}
+            className="text-caption font-semibold text-ink-faint underline-offset-2 transition-colors hover:text-ink-muted hover:underline"
+          >
+            About this demo
+          </button>
           <ThemeToggle />
         </div>
-        <p className="px-1.5 text-caption leading-relaxed text-ink-faint">
-          Synthetic demo data. No bank connections, no real money.
-        </p>
       </div>
     </aside>
   );
 }
 
-function MobileHeader() {
+function MobileHeader({ onOpenAbout }: { onOpenAbout: () => void }) {
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between border-b border-line bg-surface/90 px-4 py-3 backdrop-blur lg:hidden">
       <Link to="/" aria-label="Sumwell home">
         <Logo />
       </Link>
       <div className="flex items-center gap-2.5">
-        <DemoChip />
+        <DataChip onOpen={onOpenAbout} />
         <ThemeToggle />
       </div>
     </header>
@@ -123,7 +139,8 @@ function MobileHeader() {
 /**
  * App shell: sticky mobile header, bottom navigation (4 tabs) on small
  * screens, and a matching sidebar on lg+ screens. Content is rendered in a
- * centered column below.
+ * centered column below. One persistent demo indicator + the "About this
+ * demo" sheet live here so screens don't repeat the warnings (Finding 9).
  */
 export function AppShell({
   children,
@@ -134,6 +151,9 @@ export function AppShell({
   active?: TabId;
 }) {
   const { pathname } = useLocation();
+  const { household } = useClientData();
+  const [aboutOpen, setAboutOpen] = useState(false);
+
   const activeTab: TabId =
     active ??
     (TABS.find(
@@ -148,8 +168,8 @@ export function AppShell({
       >
         Skip to content
       </a>
-      <Sidebar />
-      <MobileHeader />
+      <Sidebar onOpenAbout={() => setAboutOpen(true)} />
+      <MobileHeader onOpenAbout={() => setAboutOpen(true)} />
       <main
         id="app-main"
         className="px-4 pb-28 pt-5 lg:pl-68 lg:pr-8 lg:pb-16 lg:pt-8"
@@ -161,6 +181,11 @@ export function AppShell({
       <span className="sr-only" aria-live="polite">
         {activeTab === "home" ? "" : `${activeTab} tab`}
       </span>
+      <AboutDemoSheet
+        open={aboutOpen}
+        onClose={() => setAboutOpen(false)}
+        sourceIsDemo={household?.source === "demo"}
+      />
     </div>
   );
 }
