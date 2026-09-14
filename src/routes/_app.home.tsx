@@ -13,6 +13,7 @@ import { formatCents } from "~/lib/money";
 import {
   todayISO,
   formatMonthDay,
+  formatTimestampMonthDay,
   formatWeekdayMonthDay,
   relativeDaysLabel,
 } from "~/lib/client/dates";
@@ -270,7 +271,7 @@ function HeroCard({ plan, household }: { plan: HomePlan; household: Household })
         {/* source / freshness + income uncertainty — visible but quiet */}
         <div className="flex flex-col gap-1 border-t border-line-faint pt-3 text-caption text-ink-faint">
           <p>
-            {household.label} · updated {formatMonthDay(household.generatedAt)}
+            {household.label} · updated {formatTimestampMonthDay(household.generatedAt)}
           </p>
           {plan.incomeUncertain ? (
             <p>
@@ -461,7 +462,7 @@ function HomeRoute() {
         <div>
           <h1 className="text-h1 text-ink">Paycheck plan</h1>
           <p className="mt-1 text-body-sm text-ink-muted">
-            {household.label} · updated {formatMonthDay(household.generatedAt)}
+            {household.label} · updated {formatTimestampMonthDay(household.generatedAt)}
           </p>
         </div>
         <Link

@@ -4,6 +4,7 @@ import {
   daysBetween,
   formatCycleRange,
   formatMonthDay,
+  formatTimestampMonthDay,
   formatMonthYear,
   formatPayoffDateLabel,
   formatWeekdayMonthDay,
@@ -51,6 +52,15 @@ describe("dates", () => {
   test("formatting helpers are deterministic (UTC-anchored)", () => {
     expect(formatMonthDay("2026-09-25")).toBe("Sep 25");
     expect(formatWeekdayMonthDay("2026-09-25")).toBe("Fri, Sep 25");
+  });
+
+  test("formatTimestampMonthDay: \"updated\" captions tolerate full ISO timestamps", () => {
+    // household.generatedAt is a full timestamp ("2026-09-10T12:00:00Z").
+    expect(formatTimestampMonthDay("2026-09-10T12:00:00Z")).toBe("Sep 10");
+    // Date-only input (the older shape) passes through untouched.
+    expect(formatTimestampMonthDay("2026-09-10")).toBe("Sep 10");
+    // Malformed input still fails loudly — no silent fallback.
+    expect(() => formatTimestampMonthDay("not-a-date")).toThrow();
   });
 
   test("relativeDaysLabel covers today/tomorrow/N days", () => {

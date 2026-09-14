@@ -98,6 +98,15 @@ export function formatMonthDay(iso: string): string {
   const { y, m, d } = parseISODate(iso);
   return monthDayFormatter.format(new Date(Date.UTC(y, m - 1, d)));
 }
+/**
+ * "Sep 10" from a full ISO timestamp ("2026-09-10T12:00:00Z") — the shape of
+ * `household.generatedAt`/`updatedAt` "last updated" captions. Takes the
+ * date prefix; date-only input passes through untouched. Malformed input
+ * still throws (parsing stays strict — this is only a label helper).
+ */
+export function formatTimestampMonthDay(isoTimestamp: string): string {
+  return formatMonthDay(isoTimestamp.slice(0, 10));
+}
 
 /** "Fri, Sep 25". */
 export function formatWeekdayMonthDay(iso: string): string {
