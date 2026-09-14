@@ -12,6 +12,9 @@ const debt = (over: Partial<Debt>): Debt => ({
   aprKind: "unknown",
   minPaymentCents: 1000,
   minPaymentIsEstimate: false,
+  // Explicitly unknown unless a test supplies a day — a missing due day must
+  // never be treated as a due day.
+  minPaymentDueDay: null,
   source: "demo",
   ...over,
 });
@@ -138,5 +141,62 @@ describe("addMonthsISO", () => {
     expect(addMonthsISO("2026-11-15", 2)).toBe("2027-01-15");
     expect(addMonthsISO("2027-01-31", 1)).toBe("2027-02-28");
     expect(addMonthsISO("2028-01-31", 1)).toBe("2028-02-29"); // leap year
+  });
+});
+
+describe("payoff honesty — no positive-balance debt is labeled paid off", () => {
+  test("a multi-year payoff lands in a later year with its month preserved", () => {
+    // $1,240 at $50/mo with no interest → paid in month 25 (Sep 2026 + 25 = Oct 2028).
+    const { avalanche } = debtComparison(
+      [debt({ id: "M", name: "Medical", balanceCents: 124000, minPaymentCents: 5000 })],
+      0,
+      "2026-09-01",
+    );
+    const medical = avalanche.payoffRows.find((r) => r.debtId === "M")!;
+    expect(medical.payoffMonth).toBe(25);
+    expect(medical.payoffDate).toBe("2028-10-01");
+    expect(medical.paidOff).toBe(true);
+    // The payoff date is always strictly in the future — never "today".
+    expect(medical.payoffDate! > "2026-09-01").toBe(true);
+  });
+
+  test("a debt beyond the modeled horizon keeps its balance and is NOT 'paid off'", () => {
+    // A huge balance with a tiny minimum will never finish inside 600 months.
+    const { avalanche } = debtComparison(
+      [
+        debt({
+          id: "BIG",
+          name: "Mortgage",
+          balanceCents: 10000 * 10000, // $1,000,000
+          aprBps: 500,
+          aprKind: "fixed",
+          minPaymentCents: 100,
+        }),
+      ],
+      0,
+      "2026-09-01",
+    );
+    const big = avalanche.payoffRows.find((r) => r.debtId === "BIG")!;
+    expect(avalanche.truncated).toBe(true);
+    expect(big.paidOff).toBe(false);
+    expect(big.payoffMonth).toBeNull();
+    expect(big.payoffDate).toBeNull();
+    // The balance is still (positively) outstanding — the row never claims
+    // completion, and its payoff label would say "beyond the modeled horizon".
+    expect(big.totalPaidCents).toBeGreaterThan(0);
+  });
+
+  test("paidOff always matches payoffMonth in the seed comparison", () => {
+    const seed = createDemoSnapshot();
+    for (const strategy of [debtComparison(seed.debts, 25000, "2026-09-01").avalanche,
+      debtComparison(seed.debts, 25000, "2026-09-01").snowball]) {
+      for (const row of strategy.payoffRows) {
+        expect(row.paidOff).toBe(row.payoffMonth !== null);
+        if (row.payoffDate !== null) {
+          // A labeled payoff is always projected into the future.
+          expect(row.payoffDate > "2026-09-01").toBe(true);
+        }
+      }
+    }
   });
 });

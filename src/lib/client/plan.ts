@@ -242,7 +242,7 @@ export function debtMinimumAudit(household: Household): DebtMinimumAuditRow[] {
   return household.debts
     .filter((d) => d.balanceCents > 0)
     .map((debt) => {
-      if (debt.minPaymentDueDay === null) {
+      if (debt.minPaymentDueDay == null) {
         return {
           debt,
           dueDay: null,

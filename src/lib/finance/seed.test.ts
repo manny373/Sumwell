@@ -64,7 +64,11 @@ describe("demo snapshot — deterministic and clearly synthetic", () => {
     expect(contrib.source).not.toBe("projected");
     expect(contrib.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(contrib.amountCents).toBe(20000);
-    expect(contrib.note).toContain("txn-savings-xfer-0902");
+    // The note is human copy that names the record WITHOUT an internal raw id
+    // (raw record ids only appear inside technical-details affordances).
+    expect(contrib.note).toContain("transfer");
+    expect(contrib.note).toContain("$200.00");
+    expect(contrib.note).not.toContain("txn-");
     // The evidence transaction really exists and matches the amount.
     const transfer = seed.transactions.find((t) => t.id === "txn-savings-xfer-0902")!;
     expect(Math.abs(transfer.amountCents)).toBe(contrib.amountCents);

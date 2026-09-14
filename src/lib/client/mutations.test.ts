@@ -122,7 +122,10 @@ describe("seed goal contributions stay honest", () => {
     const snapshot = createDemoSnapshot();
     const contrib = snapshot.goalContributions[0];
     expect(snapshot.goalContributions).toHaveLength(1);
-    expect(contrib.note).toContain("txn-savings-xfer-0902");
+    // Human copy names the record by amount/date — no internal raw id in copy.
+    expect(contrib.note).toContain("transfer");
+    expect(contrib.note).toContain("$200.00");
+    expect(contrib.note).not.toContain("txn-");
     const transfer = snapshot.transactions.find(
       (t) => t.id === "txn-savings-xfer-0902",
     )!;

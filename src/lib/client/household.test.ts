@@ -106,7 +106,9 @@ describe("manualHouseholdFor", () => {
       amountCents: 5000,
       percentBps: null,
       enabled: true,
-      schedule: "perPaycheck",
+      // Per-check giving is stored at the plan's own cadence (declared
+      // assumption — "every 2 weeks") because no pay schedule is on record.
+      frequency: "biweekly",
       source: "manual",
     });
 
@@ -117,6 +119,7 @@ describe("manualHouseholdFor", () => {
         { goalId: "goal-manual", name: "Emergency fund", amountCents: 20000 },
       ],
       debtExtraBudgetCents: 0,
+      adoptedDebtExtraCents: 0, // a what-if budget is never adopted implicitly
     });
     expect(h.transactions).toEqual([]);
     expect(h.debts).toEqual([]);

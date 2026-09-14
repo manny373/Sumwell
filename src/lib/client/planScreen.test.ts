@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { AutomationRule, GivingPlan } from "~/lib/finance/types";
+import { givingLabel } from "~/lib/finance/giving";
 import { demoHousehold, manualHouseholdFor } from "./household";
+import { buildHomePlan } from "./plan";
 import {
   automationRuleViews,
+  cycleDebtMinimumsView,
   cycleObligationsView,
   debtGroupName,
   debtStrategyView,
@@ -53,6 +56,11 @@ describe("debt strategy view", () => {
     // minimums 96.00 + 312.40 + 145.00 + 232.00 + 50.00 = $835.40
     expect(view.minimumsCents).toBe(83540);
     expect(view.monthlyTotalCents).toBe(108540); // + $250 extra
+    // The what-if is NOT adopted: it never flows into Home.
+    expect(view.adoptedExtraCents).toBe(0);
+    expect(view.whatIfMatchesAdopted).toBe(false);
+    expect(view.adoptedPerCheckCents).toBe(0);
+    expect(view.gap.computed).toBe(true);
     // Medical bill has unknown APR → interest is never presented as complete.
     expect(view.comparison.avalanche.interestComplete).toBe(false);
     expect(view.comparison.avalanche.totalInterestCents).toBeNull();
@@ -79,6 +87,16 @@ describe("debt strategy view", () => {
     expect(view.monthlyTotalCents).toBe(view.minimumsCents);
   });
 
+  test("applying the what-if as adopted reflects a per-check amount and gap", () => {
+    const h = { ...demo(), assumptions: { ...demo().assumptions, adoptedDebtExtraCents: 25000 } };
+    const view = debtStrategyView(h, "2026-09-12");
+    expect(view.adoptedExtraCents).toBe(25000);
+    // $250/mo on twice-monthly pay → $125 per check.
+    expect(view.adoptedPerCheckCents).toBe(12500);
+    const home = buildHomePlan(h, "2026-09-12").plan!;
+    expect(home.plan.debtExtraCents).toBe(12500);
+  });
+
   test("unknown-APR debt is flagged, never given an invented interest number", () => {
     const view = debtStrategyView(demo(), "2026-09-12");
     for (const strategy of [view.comparison.avalanche, view.comparison.snowball]) {
@@ -98,6 +116,22 @@ describe("debt strategy view", () => {
     expect(debtGroupName(federal)).toBe("Federal student loans");
     expect(debtGroupName(priv)).toBe("Private student loans");
     expect(debtGroupName(card)).toBe("Other debts");
+  });
+});
+
+describe("cycle debt minimums view", () => {
+  test("demo: 3 in-window minimums this cycle, the rest honestly bucketed", () => {
+    const view = cycleDebtMinimumsView(demo());
+    expect(view.audit).toHaveLength(5);
+    expect(view.inWindowCents).toBe(29100); // card 96 + federal 145 + medical 50
+    expect(view.audit.filter((r) => r.status === "inWindow")).toHaveLength(3);
+    expect(view.afterWindowCount).toBe(2);
+    expect(view.noDueDateCount).toBe(0);
+    expect(view.paidOnRecordCount).toBe(0);
+    // Every row states where its minimum is represented — never twice.
+    for (const row of view.audit) {
+      expect(row.representedWhere.length).toBeGreaterThan(0);
+    }
   });
 });
 
@@ -132,19 +166,27 @@ describe("savings goals view", () => {
   });
 });
 
-describe("giving view", () => {
-  test("demo fixed monthly $120 → per-check $60 with factual impact", () => {
+describe("giving view — single label source, same-period impact", () => {
+  test("demo fixed monthly $120 → per-check $60 with factual same-period impact", () => {
     const view = givingView(demo());
-    expect(view.cycleGivingCents).toBe(6000); // per-check share
-    expect(view.impact!.givingCents).toBe(12000); // plan-level (monthly)
-    expect(view.scheduleLabel).toBe("monthly");
-    expect(view.basisLabel).toBe("net pay");
-    expect(view.billsMonthlyCents).toBe(212120); // all 8 monthly bills
-    expect(view.goalsMonthlyCents).toBe(40000); // $200/cycle × 2 checks
-    // 12000 / (212120+40000) = 4.76% — labelled estimate, factual arithmetic.
-    expect(view.impact!.shareOfCommitmentsBps).toBe(476);
-    expect(view.impact!.percentBps).toBe(557); // 120/2153.84 ≈ 5.57% of net
-    expect(view.impact!.skipped).toBe(false);
+    expect(view.cycleGivingCents).toBe(6000); // per-check share (12000 × 12 / 24)
+    // Impact is computed for ONE period — the check — so numerator and
+    // denominator always cover the same named period.
+    expect(view.impact!.givingCents).toBe(6000);
+    expect(view.impact!.period).toBe("check");
+    expect(view.impact!.basisCents).toBe(215384); // this check's net
+    // Same-period shares: 6000/215384 ≈ 2.79% and 6000/(35870+20000) ≈ 10.74%.
+    expect(view.impact!.percentBps).toBe(279);
+    expect(view.impact!.shareOfCommitmentsBps).toBe(1074);
+    expect(view.impact!.basisLabel).toBe("this pay period");
+    expect(view.skipped).toBe(false);
+    // Labels come from the single givingLabel source.
+    expect(view.label.amountNote).toBe("Fixed — $120.00/month");
+    expect(view.label.frequencyNote).toBe("monthly");
+    expect(view.label.perCheckNote).toContain("$60.00 set aside per check");
+    // Per-check bills/goals behind the same-period share (this cycle's window).
+    expect(view.billsCycleCents).toBe(35870); // the 6 in-window bills
+    expect(view.goalsCycleCents).toBe(20000); // this cycle's accepted allocation
   });
 
   test("a skipped/disabled plan shows skipped and never invents a gift", () => {
@@ -152,8 +194,9 @@ describe("giving view", () => {
     const off: GivingPlan = { ...h.givingPlan, enabled: false };
     const view = givingView({ ...h, givingPlan: off });
     expect(view.cycleGivingCents).toBeNull();
-    expect(view.impact!.givingCents).toBe(0);
-    expect(view.impact!.skipped).toBe(true);
+    expect(view.skipped).toBe(true);
+    expect(view.impact).toBeNull(); // no gift → no impact to report
+    expect(view.resolutionNote).toBeNull();
   });
 
   test("percent giving view computes the cycle amount off net pay", () => {
@@ -163,13 +206,33 @@ describe("giving view", () => {
       mode: "percent",
       amountCents: null,
       percentBps: 1000,
-      schedule: "perPaycheck",
+      frequency: "monthly",
     };
     const view = givingView({ ...h, givingPlan: pct });
     expect(view.cycleGivingCents).toBe(21538); // 10% of $2,153.84 net
     expect(view.impact!.givingCents).toBe(21538);
-    expect(view.impact!.percentBps).toBe(1000);
-    expect(view.amountNote).toBe("10% of net pay");
+    expect(view.impact!.percentBps).toBe(1000); // 10% because basis === giving
+    expect(view.label.amountNote).toBe("10% of net pay");
+  });
+
+  test("label parity: givingView, givingLabel, and Home agree on every number", () => {
+    const h = demo();
+    const view = givingView(h);
+    // The view's label IS the canonical givingLabel output for the same inputs.
+    const canonical = givingLabel(h.givingPlan, {
+      payFrequency: "twiceMonthly",
+      netCents: 215384,
+      grossCents: 288462,
+      givingCents: 6000,
+    });
+    expect(view.label).toEqual(canonical);
+    // Home's per-check deduction equals the Plan view's cycle amount.
+    const home = buildHomePlan(h, "2026-09-12").plan!;
+    expect(view.cycleGivingCents).toBe(6000);
+    expect(home.givingCents).toBe(6000);
+    expect(home.plan.givingCents).toBe(6000);
+    // And the impact percentages use the SAME basis the Home plan used.
+    expect(view.impact!.basisCents).toBe(home.paycheck.netCents);
   });
 });
 
@@ -192,7 +255,7 @@ describe("automation rule previews (simulated, data only)", () => {
       (v) => v.rule.id === "rule-emergency",
     )!;
     expect(view.wouldMoveCents).toBe(20000);
-    expect(view.triggerDate).toBe("2026-09-26"); // 9/25 + 1
+    expect(view.triggerDate).toBe("2026-09-26"); // canonical next paycheck 9/25 + 1
     expect(view.sourceAccount!.id).toBe("acc-checking");
     expect(view.destinationAccount!.id).toBe("acc-savings");
     expect(view.sourceAvailableCents).toBe(179994);
@@ -205,17 +268,93 @@ describe("automation rule previews (simulated, data only)", () => {
     expect(view.forecast!.incomeUncertain).toBe(true);
   });
 
-  test("formula rule resolves the linked debt's minimum payment", () => {
+  test("formula rule resolves the linked debt's minimum payment on ITS OWN due day", () => {
     const view = automationRuleViews(demo(), "2026-09-12").find(
       (v) => v.rule.id === "rule-cc-min",
     )!;
     expect(view.linkedDebt!.id).toBe("debt-card");
     expect(view.wouldMoveCents).toBe(9600); // statement minimum (estimate)
     expect(view.amountLabel).toContain("Minimum payment");
-    // "on due date" → modeled as the next bill due from today (Electric, due 12th).
-    expect(view.triggerDate).toBe("2026-09-12");
-    expect(view.triggerLabel).toContain("Electric");
+    // onDueDate resolves through the LINKED debt's due day (22) — the credit
+    // card's own next occurrence, never the next random bill (Electric, 12th).
+    expect(view.triggerDate).toBe("2026-09-22");
+    expect(view.triggerLabel).toContain("Platinum Rewards Card");
+    expect(view.triggerLabel).not.toContain("Electric");
     expect(view.sufficient).toBe(true);
+  });
+
+  test("two onDueDate rules on debts with different due days resolve to THEIR dates", () => {
+    const h = demo();
+    const medicalRule: AutomationRule = {
+      ...h.automationRules[1],
+      id: "rule-med-min",
+      name: "Medical minimum (test)",
+      linkedDebtId: "debt-medical", // due day 15
+      offsetDays: 1,
+    };
+    const views = automationRuleViews(
+      { ...h, automationRules: [medicalRule] },
+      "2026-09-12",
+    );
+    const med = views[0];
+    // Medical's own due day 15 (+1 offset) — card's 22 is not substituted.
+    expect(med.triggerDate).toBe("2026-09-16");
+    expect(med.triggerLabel).toContain("Medical Bill — Demo Clinic");
+    const card = automationRuleViews(h, "2026-09-12").find(
+      (v) => v.rule.id === "rule-cc-min",
+    )!;
+    expect(card.triggerDate).toBe("2026-09-22");
+    expect(med.triggerDate).not.toBe(card.triggerDate);
+  });
+
+  test("paycheck-relative rules anchor to the CANONICAL next paycheck (first unreceived)", () => {
+    const h = demo();
+    const twoUpcoming = {
+      ...h,
+      paychecks: [
+        ...h.paychecks,
+        {
+          id: "pc-1010",
+          date: "2026-10-10",
+          employer: "Demo Manufacturer",
+          grossCents: 288462,
+          netCents: 215384,
+          received: false,
+          accountId: "acc-checking",
+          source: "demo" as const,
+        },
+      ],
+    };
+    const view = automationRuleViews(twoUpcoming, "2026-09-12").find(
+      (v) => v.rule.id === "rule-emergency",
+    )!;
+    // Anchors on 9/25 (the first unreceived), not on the later 10/10 check.
+    expect(automationRuleViews(twoUpcoming, "2026-09-12").length).toBe(3);
+    expect(view.triggerDate).toBe("2026-09-26");
+  });
+
+  test("due date unknown: an onDueDate rule without a debt due day says so", () => {
+    const h = demo();
+    const noDay: Debt_for_test = {
+      ...h.debts.find((d) => d.id === "debt-medical")!,
+      id: "debt-noday",
+      name: "No-day card",
+      minPaymentDueDay: null,
+    };
+    const rule: AutomationRule = {
+      ...h.automationRules[1],
+      id: "rule-noday",
+      name: "No-day min (test)",
+      linkedDebtId: "debt-noday",
+    };
+    const view = automationRuleViews(
+      { ...h, debts: [...h.debts, noDay], automationRules: [rule] },
+      "2026-09-12",
+    )[0];
+    expect(view.triggerDate).toBeNull();
+    expect(view.triggerLabel).toContain("Due date unknown");
+    expect(view.triggerLabel).toContain("No-day card");
+    expect(view.sufficient).toBeNull();
   });
 
   test("a rule that outruns the balance flags insufficiency (would pause)", () => {
@@ -300,6 +439,9 @@ describe("automation rule previews (simulated, data only)", () => {
   });
 });
 
+/** Local alias so a Debt literal inside a test file stays self-documenting. */
+type Debt_for_test = import("~/lib/finance/types").Debt;
+
 describe("manual household plan views", () => {
   const inputs: ManualOnboardingInputs = {
     availableCents: 180000,
@@ -325,8 +467,11 @@ describe("manual household plan views", () => {
     expect(goalViews(h)[0].goal.confirmedHistory).toEqual([]);
     expect(projectedGoalContributions(h)).toHaveLength(1); // the accepted goal
     const giving = givingView(h);
-    expect(giving.cycleGivingCents).toBe(5000); // perPaycheck fixed
+    expect(giving.cycleGivingCents).toBe(5000); // per-check fixed
     expect(giving.impact!.givingCents).toBe(5000);
-    expect(giving.goalsMonthlyCents).toBe(20000); // 1 cycle/month for manual
+    expect(giving.billsCycleCents).toBe(100000); // both manual bills
+    expect(giving.goalsCycleCents).toBe(20000); // this cycle's goal allocation
+    // Manual household has no pay cadence on record → the label says so.
+    expect(giving.label.frequencyNote).toContain("pay cadence not on record");
   });
 });

@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   addDays,
   daysBetween,
+  formatCycleRange,
   formatMonthDay,
+  formatMonthYear,
+  formatPayoffDateLabel,
   formatWeekdayMonthDay,
   nextMonthlyOccurrence,
   parseISODate,
@@ -55,5 +58,31 @@ describe("dates", () => {
     expect(relativeDaysLabel(1)).toBe("tomorrow");
     expect(relativeDaysLabel(13)).toBe("in 13 days");
     expect(() => relativeDaysLabel(-1)).toThrow();
+  });
+
+  test("month-end boundaries: 31st-in-short-month clamps INSIDE the month", () => {
+    // Due day 31 after Apr 20 → Apr 30 (April has 30 days), NOT May 1.
+    expect(nextMonthlyOccurrence(31, "2026-04-20")).toBe("2026-04-30");
+    // …and the next occurrence after that clamp is May 31 (never skipped).
+    expect(nextMonthlyOccurrence(31, "2026-04-30")).toBe("2026-05-31");
+    expect(nextMonthlyOccurrence(31, "2026-01-31")).toBe("2026-02-28");
+    expect(nextMonthlyOccurrence(30, "2026-02-28")).toBe("2026-03-30");
+  });
+
+  test("formatPayoffDateLabel: multi-year payoff shows YEAR + months, never a bare day", () => {
+    // 25 months out from Sep 2026 lands in Oct 2028 — the year must show.
+    expect(formatPayoffDateLabel(25, "2028-10-01")).toBe("Oct 2028 (~25 months)");
+    expect(formatPayoffDateLabel(3, "2026-12-01")).toBe("Dec 2026 (~3 months)");
+    expect(formatMonthYear("2028-10-01")).toBe("Oct 2028");
+    // Not paid within the modeled horizon — never labeled as a payoff.
+    expect(formatPayoffDateLabel(null, null)).toBe("Beyond the modeled horizon");
+    expect(formatPayoffDateLabel(25, null)).toBe("Beyond the modeled horizon");
+  });
+
+  test("formatCycleRange is wrap-safe and includes the year when crossing", () => {
+    expect(formatCycleRange("2026-09-10", "2026-09-25")).toBe("Thu, Sep 10 – Fri, Sep 25");
+    // Crossing into a new year → both ends carry the year.
+    expect(formatCycleRange("2026-12-20", "2027-01-05")).toContain("2026");
+    expect(formatCycleRange("2026-12-20", "2027-01-05")).toContain("2027");
   });
 });

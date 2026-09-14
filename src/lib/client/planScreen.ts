@@ -529,7 +529,7 @@ function ruleTrigger(
         label: "Due date unknown — this rule isn't linked to a debt or obligation.",
       };
     }
-    if (debt.minPaymentDueDay === null) {
+    if (debt.minPaymentDueDay == null) {
       return {
         date: null,
         label: `Due date unknown — no statement due date is on record for ${debt.name}.`,

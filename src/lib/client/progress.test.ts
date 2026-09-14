@@ -5,6 +5,7 @@ import {
   checkInSummary,
   confirmedDebtChanges,
   confirmedGoalChanges,
+  evidenceRecordFor,
   goalProgressViews,
 } from "./progress";
 import type { ManualOnboardingInputs } from "./types";
@@ -23,10 +24,17 @@ describe("confirmed changes — derived from dated, sourced records only", () =>
     expect(auto.evidenceId).toBe("txn-auto-payment-0905");
     expect(auto.detail).toContain("principal");
 
-    const card = changes.find((c) => c.kind === "debtBalanceReduced")!;
+    const card = changes.find((c) => c.kind === "debtPaymentRecorded")!;
     expect(card.date).toBe("2026-09-09");
     expect(card.amountCents).toBe(50000);
-    expect(card.title).toContain("Platinum Rewards Card");
+    // "Payment recorded" — the RECORD, not an invented balance reduction.
+    expect(card.title).toBe("Payment recorded");
+    expect(card.detail).toContain("records the payment itself");
+    expect(card.detail.toLowerCase()).not.toContain("reduced");
+    expect(card.detail.toLowerCase()).not.toContain("saved");
+    // Balance TODAY is stated as-is (the debt's own magnitude), never spun.
+    expect(card.balanceTodayCents).toBe(328744);
+    expect(card.balanceTodayAccountName).toBe("Platinum Rewards Card");
     expect(card.evidenceId).toBe("txn-card-payment-credit-0909");
   });
 
@@ -57,7 +65,11 @@ describe("confirmed changes — derived from dated, sourced records only", () =>
     expect(c.date).toBe("2026-09-02");
     expect(c.amountCents).toBe(20000);
     expect(c.title).toContain("Emergency fund");
-    expect(c.detail).toContain("txn-savings-xfer-0902");
+    // The detail is human copy naming the record by amount — no raw id.
+    expect(c.detail).toContain("$200.00");
+    expect(c.detail).toContain("transfer");
+    expect(c.detail).not.toContain("txn-");
+    expect(c.evidenceId).toBe("gc-emergency-0902");
   });
 
   test("all confirmed changes are newest-first and distinct", () => {
@@ -68,6 +80,16 @@ describe("confirmed changes — derived from dated, sourced records only", () =>
       "2026-09-02",
     ]);
     expect(new Set(all.map((c) => c.id)).size).toBe(all.length);
+  });
+
+  test("no change copy carries a raw internal record id", () => {
+    for (const c of allConfirmedChanges(demo())) {
+      expect(c.title).not.toMatch(/txn-|gc-|debt-/);
+      expect(c.detail).not.toMatch(/txn-|gc-|debt-/);
+      // The record id lives on the dedicated evidence/technical fields only.
+      expect(c.evidenceId.length).toBeGreaterThan(0);
+      expect(c.technicalId.length).toBeGreaterThan(0);
+    }
   });
 
   test("manual households have no confirmed changes — the honest empty state", () => {
@@ -83,6 +105,45 @@ describe("confirmed changes — derived from dated, sourced records only", () =>
     };
     const h = manualHouseholdFor(inputs, "2026-09-12T10:00:00Z");
     expect(allConfirmedChanges(h)).toEqual([]);
+  });
+});
+
+describe("evidence model — evidenceId resolves to a real record", () => {
+  test("every confirmed change resolves to its actual transaction or contribution", () => {
+    const h = demo();
+    const changes = allConfirmedChanges(h);
+    expect(changes.length).toBeGreaterThan(0);
+    for (const change of changes) {
+      const record = evidenceRecordFor(h, change);
+      expect(record).not.toBeNull();
+      expect(record!.technicalId).toBe(change.evidenceId);
+      // The heading is built from the REAL record, not from change copy.
+      expect(record!.rows.length).toBeGreaterThan(0);
+      expect(record!.rows.some((r) => r.label === "Amount")).toBe(true);
+    }
+  });
+
+  test("a payment change resolves to the dated transaction that evidences it", () => {
+    const h = demo();
+    const card = confirmedDebtChanges(h).find(
+      (c) => c.kind === "debtPaymentRecorded",
+    )!;
+    const record = evidenceRecordFor(h, card)!;
+    expect(record.recordType).toBe("transaction");
+    expect(record.heading).toContain("posted");
+    const amountRow = record.rows.find((r) => r.label === "Amount")!;
+    expect(amountRow.value).toContain("$500.00");
+  });
+
+  test("a deleted record resolves to NOT FOUND — nothing is invented", () => {
+    const h = demo();
+    const change = allConfirmedChanges(h)[0];
+    const stripped = {
+      ...h,
+      transactions: h.transactions.filter((t) => t.id !== change.evidenceId),
+      goalContributions: [],
+    };
+    expect(evidenceRecordFor(stripped, change)).toBeNull();
   });
 });
 
