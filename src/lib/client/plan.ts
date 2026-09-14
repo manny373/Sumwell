@@ -50,13 +50,29 @@ export interface HomePlan {
   /** Household pay cadence used for giving/adoption math; null = unknown. */
   payFrequency: GivingFrequency | null;
   /** Earliest obligation/debt-minimum with a due date ≥ today, or null. */
-  nextObligation: { name: string; amountCents: number; dueDate: string; kind: "obligation" | "debtMinimum" } | null;
+  nextObligation: NextObligationItem | null;
   /** Giving accepted for this period (null = skipped/unresolved). */
   givingCents: number | null;
   /** True until the paycheck actually arrives — estimates must say so. */
   incomeUncertain: boolean;
   /** The engine result. */
   plan: PlanResult;
+}
+
+/**
+ * The single next obligation/debt minimum. `id` identifies the underlying
+ * record (obligation id, or debt id for a minimum) so the UI can open the
+ * relevant Plan section; `reflected` says whether the money is ALREADY
+ * accounted for in the available balance (already-reflected obligations only;
+ * false for in-window debt minimums, which the plan sets aside exactly once).
+ */
+export interface NextObligationItem {
+  name: string;
+  amountCents: number;
+  dueDate: string;
+  kind: "obligation" | "debtMinimum";
+  id: string | null;
+  reflected: boolean;
 }
 
 export interface HomePlanContext {
@@ -429,14 +445,9 @@ export function buildHomePlan(
 export function nextObligationDueOnOrAfter(
   household: Household,
   nowISO: string,
-): { name: string; amountCents: number; dueDate: string; kind: "obligation" | "debtMinimum" } | null {
+): NextObligationItem | null {
   const beforeToday = addDays(nowISO, -1);
-  const candidates: Array<{
-    name: string;
-    amountCents: number;
-    dueDate: string;
-    kind: "obligation" | "debtMinimum";
-  }> = [];
+  const candidates: NextObligationItem[] = [];
   for (const obligation of household.obligations) {
     const dueDate = nextObligationDate(obligation, beforeToday);
     if (dueDate !== null) {
@@ -445,6 +456,8 @@ export function nextObligationDueOnOrAfter(
         amountCents: obligation.amountCents,
         dueDate,
         kind: "obligation",
+        id: obligation.id,
+        reflected: obligation.alreadyReflected,
       });
     }
   }
@@ -456,6 +469,8 @@ export function nextObligationDueOnOrAfter(
         amountCents: row.debt.minPaymentCents,
         dueDate: row.dueDate,
         kind: "debtMinimum",
+        id: row.debt.id,
+        reflected: false, // set aside by this plan — never double-counted
       });
     }
   }
